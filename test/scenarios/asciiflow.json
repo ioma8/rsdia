@@ -1,0 +1,209 @@
+[
+  {
+    "id": "F-01",
+    "title": "Box drag 10x5",
+    "steps": [{ "tool": "box" }, { "drag": [[0, 0], [9, 4]] }]
+  },
+  {
+    "id": "F-02",
+    "title": "Two boxes sharing an edge",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [9, 4]] },
+      { "drag": [[9, 0], [18, 4]] }
+    ]
+  },
+  {
+    "id": "F-02b",
+    "title": "Box overlapping another box's edge off-grid",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [9, 4]] },
+      { "drag": [[9, 2], [18, 6]] }
+    ]
+  },
+  {
+    "id": "F-03",
+    "title": "Arrow in empty space, drag down-right, default elbow",
+    "steps": [{ "tool": "arrow" }, { "drag": [[0, 0], [4, 2], [8, 4]] }]
+  },
+  {
+    "id": "F-04",
+    "title": "Arrow from right side of box A to the left side of box B",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [6, 4]] },
+      { "drag": [[13, 0], [19, 4]] },
+      { "tool": "arrow" },
+      { "drag": [[6, 2], [9, 2], [12, 2]] }
+    ]
+  },
+  {
+    "id": "F-04b",
+    "title": "Arrow ending on box B's border cell",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [6, 4]] },
+      { "drag": [[13, 0], [19, 4]] },
+      { "tool": "arrow" },
+      { "drag": [[6, 2], [13, 2]] }
+    ]
+  },
+  {
+    "id": "F-05",
+    "title": "Arrow from bottom edge of box A to empty space down-right",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [6, 2]] },
+      { "tool": "arrow" },
+      { "drag": [[3, 2], [12, 6]] }
+    ]
+  },
+  {
+    "id": "F-06",
+    "title": "Line crossing an existing perpendicular line",
+    "steps": [
+      { "tool": "line" },
+      { "drag": [[5, 0], [5, 6]] },
+      { "drag": [[0, 3], [10, 3]] }
+    ]
+  },
+  {
+    "id": "F-07",
+    "title": "F-03 with Shift (flipped elbow)",
+    "steps": [{ "tool": "arrow" }, { "drag": [[0, 0], [4, 2], [8, 4]], "flip": true }]
+  },
+  {
+    "id": "F-08",
+    "title": "Select: drag box B's left edge 3 cells right with the F-04 arrow attached",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [6, 4]] },
+      { "drag": [[13, 0], [19, 4]] },
+      { "tool": "arrow" },
+      { "drag": [[6, 2], [12, 2]] },
+      { "tool": "select" },
+      { "drag": [[13, 3], [14, 3], [16, 3]] }
+    ]
+  },
+  {
+    "id": "F-09",
+    "title": "Select: drag the F-04 arrow head 2 cells down",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [6, 4]] },
+      { "drag": [[13, 0], [19, 4]] },
+      { "tool": "arrow" },
+      { "drag": [[6, 2], [12, 2]] },
+      { "tool": "select" },
+      { "drag": [[12, 2], [12, 3], [12, 4]] }
+    ]
+  },
+  {
+    "id": "F-10",
+    "title": "Line ending on an existing line's end",
+    "steps": [
+      { "tool": "line" },
+      { "drag": [[0, 0], [5, 0]] },
+      { "drag": [[5, 4], [5, 0]] }
+    ]
+  },
+  {
+    "id": "F-11",
+    "title": "Text typed over a line",
+    "steps": [
+      { "tool": "line" },
+      { "drag": [[0, 1], [8, 1]] },
+      { "tool": "text" },
+      { "text": [2, 1], "type": "hi" }
+    ]
+  },
+  {
+    "id": "F-12",
+    "title": "Arrow drawn from an existing arrow head",
+    "steps": [
+      { "tool": "arrow" },
+      { "drag": [[0, 0], [6, 0]] },
+      { "drag": [[6, 0], [10, 3]] }
+    ]
+  },
+  {
+    "id": "F-13",
+    "title": "Select: move a box by its interior with an attached arrow",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [6, 4]] },
+      { "drag": [[13, 0], [19, 4]] },
+      { "tool": "arrow" },
+      { "drag": [[6, 2], [12, 2]] },
+      { "tool": "select" },
+      { "drag": [[16, 2], [16, 4], [17, 6]] }
+    ]
+  },
+  {
+    "id": "F-14",
+    "title": "Select: rubber-band select a box and move it",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[2, 2], [8, 5]] },
+      { "tool": "select" },
+      { "drag": [[0, 0], [10, 7]] },
+      { "drag": [[1, 1], [5, 2]] }
+    ]
+  },
+  {
+    "id": "F-15",
+    "title": "Select: delete a box attached to a line",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [6, 4]] },
+      { "tool": "line" },
+      { "drag": [[6, 2], [14, 2]] },
+      { "tool": "select" },
+      { "drag": [[-1, -1], [6, 5]] },
+      { "key": "<backspace>" }
+    ]
+  },
+  {
+    "id": "F-16",
+    "title": "Line T-join into the middle of an existing line",
+    "steps": [
+      { "tool": "line" },
+      { "drag": [[0, 0], [10, 0]] },
+      { "drag": [[5, 0], [5, 4]] }
+    ]
+  },
+  {
+    "id": "F-17",
+    "title": "Arrow up-left from a box's top edge",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[10, 6], [18, 9]] },
+      { "tool": "arrow" },
+      { "drag": [[14, 6], [2, 0]] }
+    ]
+  },
+  {
+    "id": "F-18",
+    "title": "Select: drag a line segment of an elbow connector",
+    "steps": [
+      { "tool": "box" },
+      { "drag": [[0, 0], [6, 2]] },
+      { "drag": [[12, 8], [18, 10]] },
+      { "tool": "line" },
+      { "drag": [[3, 2], [15, 8]] },
+      { "tool": "select" },
+      { "drag": [[3, 4], [4, 4], [7, 4]] }
+    ]
+  },
+  {
+    "id": "F-20",
+    "title": "Box drawn across an existing line",
+    "steps": [
+      { "tool": "line" },
+      { "drag": [[0, 3], [20, 3]] },
+      { "tool": "box" },
+      { "drag": [[5, 0], [12, 6]] }
+    ]
+  }
+]
