@@ -1,7 +1,7 @@
 {
   "name": "lazydraw",
-  "version": "0.1.0",
-  "description": "Terminal ASCII diagram editor modeled on ASCIIFlow",
+  "version": "0.1.1",
+  "description": "lazydraw is a terminal ASCII editor for drawing quick diagrams and sketches",
   "type": "module",
   "license": "MIT",
   "author": "Çağrı Gökpunar",
