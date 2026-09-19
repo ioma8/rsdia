@@ -1,13 +1,23 @@
 # lazydraw
 
+[![npm](https://img.shields.io/npm/v/lazydraw)](https://www.npmjs.com/package/lazydraw)
+[![license](https://img.shields.io/npm/l/lazydraw)](LICENSE)
+
 A terminal ASCII diagram editor. It looks and behaves like [ASCIIFlow](https://asciiflow.com): the same grid, arrows, and toolbar, running in your terminal.
 
 ```
-┌─────┐      ┌─────┐
-│  A  ├─────►│  B  │
-└──┬──┘      └─────┘
-   │
-   └───────► lazydraw
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ ≡ │ box select arrow line text eraser │ export │ ⟲ ⟳ │ ⚙ │ help │
+  └─────────────────────────────────────────────────────────────────┘
+
+  ┌──────────┐      ┌──────────┐       ┌─────────┐      ┌─────────────┐
+  │    I     ├─────►│   love   ├───┬──►│   bun   ├─────►│   install   │
+  └──────────┘      └──────────┘   │   └────┬────┘      └──────┬──────┘
+                                   │        │                  │
+                                   │        │                  │
+  ┌──────────┐      ┌──────────┐   │   ┌────┴────┐      ┌──────▼──────┐
+  │   draw   │◄─────┤   lazy   │◄──┘   │   npm   │      │ -g lazydraw │
+  └──────────┘      └──────────┘       └─────────┘      └─────────────┘
 ```
 
 ## Install
