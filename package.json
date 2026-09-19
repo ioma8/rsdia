@@ -3,16 +3,40 @@
   "version": "0.1.0",
   "description": "Terminal ASCII diagram editor modeled on ASCIIFlow",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "author": "Çağrı Gökpunar",
+  "homepage": "https://github.com/mpospirit/lazydraw#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mpospirit/lazydraw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mpospirit/lazydraw/issues"
+  },
+  "keywords": [
+    "ascii",
+    "ascii-art",
+    "asciiflow",
+    "diagram",
+    "terminal",
+    "tui",
+    "cli",
+    "editor",
+    "opentui"
+  ],
   "bin": {
     "lazydraw": "src/cli.ts"
   },
+  "files": [
+    "src"
+  ],
   "scripts": {
     "start": "bun src/cli.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "fixtures": "bun scripts/capture-fixtures.ts",
-    "build": "bun build src/cli.ts --compile --outfile dist/lazydraw"
+    "build": "bun build src/cli.ts --compile --outfile dist/lazydraw",
+    "prepublishOnly": "bun run typecheck && bun test"
   },
   "engines": {
     "bun": ">=1.3"

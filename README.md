@@ -10,18 +10,42 @@ A terminal ASCII diagram editor. It looks and behaves like [ASCIIFlow](https://a
    └───────► lazydraw
 ```
 
-## Run
+## Install
 
-Requires [Bun](https://bun.sh) 1.3 or later, and a terminal with mouse support.
+lazydraw runs on the [Bun](https://bun.sh) runtime, so Bun 1.3 or later has to be
+installed. You also want a terminal with mouse support.
 
 ```sh
-bun install
-bun start                  # open the last drawing
-bun start architecture     # open or create a drawing by name
-bun start ./diagram.ld.json
-bun start --import notes.txt
+bun install -g lazydraw
+lazydraw
+```
 
-bun run build              # standalone binary at dist/lazydraw
+If the `lazydraw` command isn't found afterwards, Bun's global bin directory isn't on
+your `PATH`. Add it to your shell profile:
+
+```sh
+export PATH="$HOME/.bun/bin:$PATH"
+```
+
+npm installs it just as well, and usually lands somewhere already on your `PATH`:
+
+```sh
+npm install -g lazydraw
+```
+
+Or skip installing altogether:
+
+```sh
+bunx lazydraw
+```
+
+## Run
+
+```sh
+lazydraw                     # open the last drawing
+lazydraw architecture        # open or create a drawing by name
+lazydraw ./diagram.ld.json
+lazydraw --import notes.txt
 ```
 
 Export a drawing without opening the UI:
@@ -78,15 +102,17 @@ Drawings autosave 500 ms after each change, and again on quit.
 
 - **tmux:** needs `set -g mouse on`. Copying via OSC 52 needs `set -g set-clipboard on`.
 - **macOS:** Alt+digit needs "Option as Meta" (or use the bare digits).
-- **Shift+drag:** many terminals keep this for native text selection. Press `f` during the drag to flip the elbow instead.
 - **Colors:** the default `terminal` theme reads your terminal's own palette (OSC 10/11/4) and wears it — background, text and ANSI colors — so lazydraw is see-through and matches whatever your terminal looks like. `settings → theme` also offers ten IDE themes, which paint their own background: `dracula`, `nord`, `tokyo-night`, `catppuccin`, `one-dark`, `gruvbox`, `monokai`, `night-owl`, `solarized-dark`, `github-light`. Terminals that don't answer the color query fall back to `nord`.
 - **Grid:** the default `lattice` style draws `🭼` (U+1FB7C) in each empty cell, tinted 7% from your background toward the text color so it stays faint. If your terminal doesn't render it as cell-edge hairlines, switch to `checker` in `settings`.
 
 ## Development
 
 ```sh
+bun install
+bun start           # run from source
 bun test            # unit, fixture, and end-to-end tests
 bun run typecheck
+bun run build       # standalone binary at dist/lazydraw
 ```
 
 - `src/core` is pure TypeScript with no terminal code. Its drawing logic (glyph connection, snapping, line routing, box/line/select/move tools, export wrappers) is ported from ASCIIFlow's `client/`.
@@ -99,8 +125,6 @@ bun run typecheck
   ```
 
 - `test/upstream` runs ASCIIFlow's own spec files against lazydraw's core, through a small compatibility shim.
-
-The design reference is `lazydraw-dev-reference.md`.
 
 ## Inspiration and credits
 
