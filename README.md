@@ -3,8 +3,6 @@
 [![npm](https://img.shields.io/npm/v/lazydraw)](https://www.npmjs.com/package/lazydraw)
 [![license](https://img.shields.io/npm/l/lazydraw)](LICENSE)
 
-A terminal ASCII diagram editor. It looks and behaves like [ASCIIFlow](https://asciiflow.com): the same grid, arrows, and toolbar, running in your terminal.
-
 ```
   ┌─────────────────────────────────────────────────────────────────┐
   │ ≡ │ box select arrow line text eraser │ export │ ⟲ ⟳ │ ⚙ │ help │
@@ -19,6 +17,13 @@ A terminal ASCII diagram editor. It looks and behaves like [ASCIIFlow](https://a
   │   draw   │◄─────┤   lazy   │◄──┘   │   npm   │      │ -g lazydraw │
   └──────────┘      └──────────┘       └─────────┘      └─────────────┘
 ```
+
+`lazydraw` is a terminal ASCII editor for drawing quick diagrams and sketches, with options to export to text files or copy to the clipboard.
+
+## Acknowledgements
+- **[ASCIIFlow](https://github.com/lewish/asciiflow)** by Lewis Hemens: the original, and the thing lazydraw is trying to be in a terminal.
+- **[termDRAW](https://github.com/benvinegar/termdraw)** by Ben Vinegar: showed that this class of editor is possible in the terminal, and shaped how the rendering loop is approached.
+- **[OpenTUI](https://github.com/sst/opentui)** by SST: the terminal UI engine the whole front end is built on.
 
 ## Install
 
@@ -135,11 +140,3 @@ bun run build       # standalone binary at dist/lazydraw
   ```
 
 - `test/upstream` runs ASCIIFlow's own spec files against lazydraw's core, through a small compatibility shim.
-
-## Inspiration and credits
-
-lazydraw exists because of the projects below.
-
-- **[ASCIIFlow](https://github.com/lewish/asciiflow)** by Lewis Hemens: the original, and the thing lazydraw is trying to be in a terminal.
-- **[termDRAW](https://github.com/benvinegar/termdraw)** by Ben Vinegar: showed that this class of editor is possible in the terminal, and shaped how the rendering loop is approached.
-- **[OpenTUI](https://github.com/sst/opentui)** by SST: the terminal UI engine the whole front end is built on.
