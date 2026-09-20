@@ -1,24 +1,10 @@
 # lazydraw
+`lazydraw` is a terminal ASCII editor for drawing quick diagrams and sketches, with options to export to text files or copy to the clipboard.
 
 [![npm](https://img.shields.io/npm/v/lazydraw)](https://www.npmjs.com/package/lazydraw)
 [![license](https://img.shields.io/npm/l/lazydraw)](LICENSE)
 
-```
-  ┌─────────────────────────────────────────────────────────────────┐
-  │ ≡ │ box select arrow line text eraser │ export │ ⟲ ⟳ │ ⚙ │ help │
-  └─────────────────────────────────────────────────────────────────┘
-
-  ┌──────────┐      ┌──────────┐       ┌─────────┐      ┌─────────────┐
-  │    I     ├─────►│   love   ├───┬──►│   bun   ├─────►│   install   │
-  └──────────┘      └──────────┘   │   └────┬────┘      └──────┬──────┘
-                                   │        │                  │
-                                   │        │                  │
-  ┌──────────┐      ┌──────────┐   │   ┌────┴────┐      ┌──────▼──────┐
-  │   draw   │◄─────┤   lazy   │◄──┘   │   npm   │      │ -g lazydraw │
-  └──────────┘      └──────────┘       └─────────┘      └─────────────┘
-```
-
-`lazydraw` is a terminal ASCII editor for drawing quick diagrams and sketches, with options to export to text files or copy to the clipboard.
+https://github.com/user-attachments/assets/ef0d2284-5a39-46ca-bd87-860584e53158
 
 ## Acknowledgements
 - **[ASCIIFlow](https://github.com/lewish/asciiflow)** by Lewis Hemens: the original, and the thing lazydraw is trying to be in a terminal.
