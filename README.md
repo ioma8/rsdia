@@ -40,6 +40,20 @@ Or skip installing altogether:
 bunx lazydraw
 ```
 
+### Inside herdr
+
+lazydraw ships a [herdr](https://herdr.dev) plugin manifest, so it can live in your
+multiplexer as a zoomed pane:
+
+```sh
+herdr plugin install mpospirit/lazydraw
+```
+
+`Ctrl+B` `Ctrl+D` opens the canvas. Rebind it by editing the `[[keys.command]]` block
+in `herdr-plugin.toml`, or from herdr's own config.
+The install step runs `bun install --production` in the clone, so Bun still has to be
+on your `PATH`.
+
 ## Run
 
 ```sh

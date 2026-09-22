@@ -1,0 +1,30 @@
+id = "mpospirit.lazydraw"
+name = "lazydraw"
+version = "0.1.1"
+min_herdr_version = "0.9.0"
+description = "Terminal ASCII editor for drawing quick diagrams and sketches"
+platforms = ["linux", "macos"]
+
+# lazydraw runs from source on Bun; fetch its one runtime dependency at install time.
+[[build]]
+command = ["bun", "install", "--production"]
+
+# The editor itself. Zoomed: lazydraw paints one full-screen mouse-driven surface.
+[[panes]]
+id = "canvas"
+title = "lazydraw"
+placement = "zoomed"
+command = ["bun", "src/cli.ts"]
+
+# Keybindings can only invoke actions, so this opens the pane over the socket API.
+[[actions]]
+id = "open"
+title = "Open lazydraw"
+contexts = ["workspace"]
+command = ["bun", "herdr/open-pane.ts"]
+
+[[keys.command]]
+key = "prefix+ctrl+d"
+type = "plugin_action"
+command = "mpospirit.lazydraw.open"
+description = "open lazydraw"
