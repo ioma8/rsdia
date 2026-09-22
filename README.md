@@ -43,16 +43,29 @@ bunx lazydraw
 ### Inside herdr
 
 lazydraw ships a [herdr](https://herdr.dev) plugin manifest, so it can live in your
-multiplexer as a zoomed pane:
+multiplexer as a pane split to the right of whatever you're working on:
 
 ```sh
 herdr plugin install mpospirit/lazydraw
 ```
 
-`Ctrl+B` `Ctrl+D` opens the canvas. Rebind it by editing the `[[keys.command]]` block
-in `herdr-plugin.toml`, or from herdr's own config.
 The install step runs `bun install --production` in the clone, so Bun still has to be
 on your `PATH`.
+
+Plugin manifests can't declare their own keybindings — herdr owns that surface — so add
+this to your own `config.toml` (opened via herdr's settings, or
+`~/.config/herdr/config.toml`) and run `herdr server reload-config`:
+
+```toml
+[[keys.command]]
+key = "prefix+ctrl+d"
+type = "plugin_action"
+command = "mpospirit.lazydraw.open"
+description = "open lazydraw"
+```
+
+`Ctrl+B` `Ctrl+D` then opens the canvas as a right-hand split. Rebind it by changing
+`key` above.
 
 ## Run
 

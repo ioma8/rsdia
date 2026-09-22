@@ -23,7 +23,8 @@ const request = {
   params: {
     plugin_id: pluginId,
     entrypoint: "canvas",
-    placement: "zoomed",
+    placement: "split",
+    direction: "right",
     focus: true,
   },
 };

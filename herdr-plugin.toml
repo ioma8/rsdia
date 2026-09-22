@@ -9,11 +9,12 @@ platforms = ["linux", "macos"]
 [[build]]
 command = ["bun", "install", "--production"]
 
-# The editor itself. Zoomed: lazydraw paints one full-screen mouse-driven surface.
+# The editor itself. open-pane.ts requests a right-hand split against the
+# active pane at launch time, overriding this default.
 [[panes]]
 id = "canvas"
 title = "lazydraw"
-placement = "zoomed"
+placement = "split"
 command = ["bun", "src/cli.ts"]
 
 # Keybindings can only invoke actions, so this opens the pane over the socket API.
@@ -23,8 +24,12 @@ title = "Open lazydraw"
 contexts = ["workspace"]
 command = ["bun", "herdr/open-pane.ts"]
 
-[[keys.command]]
-key = "prefix+ctrl+d"
-type = "plugin_action"
-command = "mpospirit.lazydraw.open"
-description = "open lazydraw"
+# Plugin manifests cannot declare keybindings themselves — herdr owns that
+# surface. Add the block below to your own config.toml (see README) and
+# `herdr server reload-config`.
+#
+# [[keys.command]]
+# key = "prefix+ctrl+d"
+# type = "plugin_action"
+# command = "mpospirit.lazydraw.open"
+# description = "open lazydraw"
