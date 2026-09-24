@@ -4,7 +4,7 @@
 use ratatui::style::{Color, Modifier};
 
 use crate::core::editor::ToolId;
-use crate::core::export::{Charset, WRAPPERS};
+use crate::core::export::{wrapper_label, Charset, WRAPPERS};
 use crate::core::vector::{index, px, units, wide};
 use crate::storage::config::GRID_STYLES;
 use crate::tui::host::{Dialog, Host};
@@ -229,8 +229,9 @@ pub fn render_export(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect
     let width = p.width.min(64.max(preview_width + 4));
     let wrappers: Vec<FlowButton> = WRAPPERS
         .iter()
-        .map(|(id, _, label)| {
-            FlowButton::new(Action::ExportWrapper(*id), *label)
+        .map(|id| {
+            let (_, label) = wrapper_label(*id);
+            FlowButton::new(Action::ExportWrapper(*id), label)
                 .active(cfg.wrapper == *id, pal.accent)
         })
         .collect();

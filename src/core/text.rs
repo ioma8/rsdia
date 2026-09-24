@@ -2,6 +2,7 @@
 //!
 //! Ported from `ASCIIFlow` (`client/text_utils.ts`), MIT © Lewis Hemens.
 
+use unicode_normalization::UnicodeNormalization;
 use unicode_width::UnicodeWidthChar;
 
 use super::grid::{bounding_box, Bounds};
@@ -72,21 +73,34 @@ pub fn layer_to_text(layer: &Layer, bounds: Option<Bounds>, trim_right: bool) ->
 
 /// Loads text at `offset`. Spaces and control characters are skipped; wide
 /// characters are replaced with `?` so the grid stays aligned.
+///
+/// The text is normalised to NFC first: a decomposed accent — an "e" plus a
+/// combining acute, which is what macOS clipboards and file names carry — then
+/// arrives as one glyph a cell can hold. Whatever still has no width (a variation
+/// selector, a mark with no precomposed form) takes no column at all.
 #[must_use]
 pub fn text_to_layer(value: &str, offset: Pos) -> Layer {
     let mut layer = Layer::new();
     let normalized = value
+        .nfc()
+        .collect::<String>()
         .replace("\r\n", "\n")
         .replace('\r', "\n")
         .replace('\t', "    ");
     for (y, line) in normalized.split('\n').enumerate() {
-        for (x, ch) in line.chars().enumerate() {
+        let mut x = 0;
+        for ch in line.chars() {
+            let width = char_width(ch);
+            if width == 0 {
+                continue;
+            }
             if ch != ' ' && !is_control(ch) {
                 layer.set(
                     Pos::new(units(x), units(y)).add(offset),
-                    if char_width(ch) == 1 { ch } else { '?' },
+                    if width == 1 { ch } else { '?' },
                 );
             }
+            x += 1;
         }
     }
     layer
@@ -121,6 +135,20 @@ mod tests {
         assert_eq!(
             layer_to_text(&text_to_layer("a漢b", v(0, 0)), None, false),
             "a?b"
+        );
+    }
+
+    #[test]
+    fn a_decomposed_accent_lands_as_one_glyph() {
+        // macOS clipboards and file names carry "e" + U+0301, not "é".
+        assert_eq!(
+            layer_to_text(&text_to_layer("e\u{301}cole", v(0, 0)), None, true),
+            "école"
+        );
+        // A mark with no precomposed form takes no column of its own.
+        assert_eq!(
+            layer_to_text(&text_to_layer("x\u{301}y", v(0, 0)), None, true),
+            "xy"
         );
     }
 

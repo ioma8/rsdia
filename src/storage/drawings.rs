@@ -11,6 +11,11 @@ use crate::core::vector::Pos;
 
 pub const FILE_EXT: &str = ".rd.json";
 
+/// The furthest a cell may sit from the origin. The canvas is sparse and terminal
+/// sized, so nothing legitimate comes near this; the limit exists because `Bounds`
+/// does unchecked `i32` arithmetic, which a `2^31`-wide span would overflow.
+const MAX_COORD: u32 = 1_000_000;
+
 #[must_use]
 pub fn xdg_dir(var: &str, fallback: &[&str]) -> PathBuf {
     if let Ok(dir) = std::env::var(var) {
@@ -162,6 +167,9 @@ pub fn deserialize(text: &str) -> Result<(String, Layer), String> {
         let (Ok(x), Ok(y)) = (i32::try_from(x), i32::try_from(y)) else {
             return Err("Coordinate out of range".to_string());
         };
+        if x.unsigned_abs() > MAX_COORD || y.unsigned_abs() > MAX_COORD {
+            return Err("Coordinate out of range".to_string());
+        }
         layer.set(Pos::new(x, y), ch);
     }
     Ok((name, layer))
@@ -215,10 +223,12 @@ impl DrawingStore {
         out
     }
 
+    /// Whether `name`'s file is already taken. Path-based on purpose: a file whose
+    /// stored name disagrees with its file name — hand-edited, copied, or renamed
+    /// outside rsdia — is still a file a save would overwrite.
     #[must_use]
     pub fn exists(&self, name: &str) -> bool {
-        let slug = slugify(name);
-        self.list().iter().any(|d| slugify(&d.name) == slug)
+        self.path_for(name).exists()
     }
 
     /// "untitled", "untitled 2", ... — first name not taken.
@@ -261,11 +271,14 @@ impl DrawingStore {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
+        // Per-process: with one shared temp name, a second instance writing the
+        // same drawing could truncate this one's file between write and rename.
         let tmp = path.with_file_name(format!(
-            ".{}.tmp",
+            ".{}.{}.tmp",
             path.file_name()
                 .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default()
+                .unwrap_or_default(),
+            std::process::id()
         ));
         fs::write(&tmp, serialize(name, layer)).map_err(|e| e.to_string())?;
         fs::rename(&tmp, path).map_err(|e| e.to_string())?;
@@ -276,7 +289,8 @@ impl DrawingStore {
     ///
     /// # Errors
     ///
-    /// If the new name cannot be saved under.
+    /// If the new name cannot be saved under, or the old file cannot be removed —
+    /// the new copy is written first, so a failure here duplicates rather than loses.
     pub fn rename(
         &self,
         old_path: &Path,
@@ -284,9 +298,15 @@ impl DrawingStore {
         layer: &Layer,
     ) -> Result<PathBuf, String> {
         let new_path = self.path_for(new_name);
-        self.save(&new_path, new_name, layer)?;
+        self.save(&new_path, new_name, layer)
+            .map_err(|e| format!("can't write {}: {e}", new_path.display()))?;
         if new_path != old_path {
-            let _ = fs::remove_file(old_path);
+            fs::remove_file(old_path).map_err(|e| {
+                format!(
+                    "renamed to {new_name}, but {} stayed: {e}",
+                    old_path.display()
+                )
+            })?;
         }
         Ok(new_path)
     }
@@ -317,6 +337,67 @@ mod tests {
     fn a_coordinate_that_does_not_fit_is_rejected() {
         let text = r#"{"version":1,"name":"x","cells":[[99999999999,0,"a"]]}"#;
         assert!(deserialize(text).is_err());
+    }
+
+    #[test]
+    fn a_coordinate_a_terminal_could_not_hold_is_rejected() {
+        // `Bounds` does unchecked i32 arithmetic, so a whole-canvas span of cells
+        // from a corrupted file must not reach it.
+        let text = r#"{"version":1,"name":"x","cells":[[-2000000000,0,"a"],[2000000000,0,"b"]]}"#;
+        assert!(deserialize(text).is_err());
+        let edge = r#"{"version":1,"name":"x","cells":[[1000000,0,"a"]]}"#;
+        assert!(deserialize(edge).is_ok());
+    }
+
+    #[test]
+    fn save_leaves_no_temp_file_and_does_not_reuse_another_processes() {
+        let dir = std::env::temp_dir().join(format!("rsdia-tmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a writable temp dir");
+        let store = DrawingStore::new(dir.clone());
+        let path = store.path_for("a");
+        // Somebody else's leftovers, under the name a shared temp file would use.
+        let stale = dir.join(".a.rd.json.tmp");
+        std::fs::write(&stale, "someone else").expect("writable");
+
+        store.save(&path, "a", &Layer::new()).expect("saved");
+        assert_eq!(
+            std::fs::read_to_string(&stale).expect("untouched"),
+            "someone else"
+        );
+        let files: Vec<String> = std::fs::read_dir(&dir)
+            .expect("readable")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            files.len(),
+            2,
+            "the drawing and that leftover, nothing else: {files:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rename_that_cannot_drop_the_old_file_says_so() {
+        let dir = std::env::temp_dir().join(format!("rsdia-rename-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a writable temp dir");
+        let store = DrawingStore::new(dir.clone());
+        let old = store.path_for("first");
+        let layer = text_to_layer("x", Pos::default());
+        store.save(&old, "first", &layer).expect("saved");
+        // Something in the way of removing it: `remove_file` refuses a directory.
+        std::fs::remove_file(&old).expect("removed");
+        std::fs::create_dir(&old).expect("created");
+
+        let err = store.rename(&old, "second", &layer).expect_err("reported");
+        assert!(err.contains("renamed to second"), "{err}");
+        assert!(
+            store.path_for("second").exists(),
+            "the new copy is safe first"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

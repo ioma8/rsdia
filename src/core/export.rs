@@ -22,41 +22,51 @@ pub enum Wrapper {
     Semicolon,
 }
 
-/// `(variant, id, label)`: the id is what config and the CLI store, the label is
-/// what the export popover shows.
-pub const WRAPPERS: [(Wrapper, &str, &str); 12] = [
-    (Wrapper::None, "none", "none"),
-    (Wrapper::Star, "star", "/* */"),
-    (Wrapper::StarFilled, "star-filled", "/***/"),
-    (Wrapper::TripleQuotes, "triple-quotes", "\"\"\" \"\"\""),
-    (Wrapper::Hash, "hash", "# hash"),
-    (Wrapper::Slash, "slash", "// slash"),
-    (Wrapper::ThreeSlashes, "three-slashes", "/// triple"),
-    (Wrapper::Dash, "dash", "-- dash"),
-    (Wrapper::Apostrophe, "apostrophe", "' apostrophe"),
-    (Wrapper::Backticks, "backticks", "``` backticks"),
-    (Wrapper::FourSpaces, "four-spaces", "    indent"),
-    (Wrapper::Semicolon, "semicolon", "; semicolon"),
+/// The wrappers in the order the export popover shows them.
+pub const WRAPPERS: [Wrapper; 12] = [
+    Wrapper::None,
+    Wrapper::Star,
+    Wrapper::StarFilled,
+    Wrapper::TripleQuotes,
+    Wrapper::Hash,
+    Wrapper::Slash,
+    Wrapper::ThreeSlashes,
+    Wrapper::Dash,
+    Wrapper::Apostrophe,
+    Wrapper::Backticks,
+    Wrapper::FourSpaces,
+    Wrapper::Semicolon,
 ];
 
-fn wrapper_info(w: Wrapper) -> (Wrapper, &'static str, &'static str) {
-    *WRAPPERS
-        .iter()
-        .find(|(id, _, _)| *id == w)
-        .expect("every wrapper is listed")
+/// `(id, label)`: the id is what config and the CLI store, the label is what the
+/// export popover shows. One exhaustive match, so a new wrapper cannot end up
+/// missing from the table.
+#[must_use]
+pub const fn wrapper_label(w: Wrapper) -> (&'static str, &'static str) {
+    match w {
+        Wrapper::None => ("none", "none"),
+        Wrapper::Star => ("star", "/* */"),
+        Wrapper::StarFilled => ("star-filled", "/***/"),
+        Wrapper::TripleQuotes => ("triple-quotes", "\"\"\" \"\"\""),
+        Wrapper::Hash => ("hash", "# hash"),
+        Wrapper::Slash => ("slash", "// slash"),
+        Wrapper::ThreeSlashes => ("three-slashes", "/// triple"),
+        Wrapper::Dash => ("dash", "-- dash"),
+        Wrapper::Apostrophe => ("apostrophe", "' apostrophe"),
+        Wrapper::Backticks => ("backticks", "``` backticks"),
+        Wrapper::FourSpaces => ("four-spaces", "    indent"),
+        Wrapper::Semicolon => ("semicolon", "; semicolon"),
+    }
 }
 
 #[must_use]
-pub fn wrapper_id(w: Wrapper) -> &'static str {
-    wrapper_info(w).1
+pub const fn wrapper_id(w: Wrapper) -> &'static str {
+    wrapper_label(w).0
 }
 
 #[must_use]
 pub fn is_wrapper(value: &str) -> Option<Wrapper> {
-    WRAPPERS
-        .iter()
-        .find(|(_, id, _)| *id == value)
-        .map(|(w, _, _)| *w)
+    WRAPPERS.into_iter().find(|w| wrapper_id(*w) == value)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -153,6 +163,17 @@ mod tests {
 
     fn drawing() -> crate::core::layer::Layer {
         text_to_layer("┌─┐  \n│ ├─►\n└─┘", Pos::default())
+    }
+
+    #[test]
+    fn every_wrapper_has_an_id_that_parses_back_to_it() {
+        for wrapper in WRAPPERS {
+            assert_eq!(
+                is_wrapper(wrapper_id(wrapper)),
+                Some(wrapper),
+                "{wrapper:?}"
+            );
+        }
     }
 
     #[test]

@@ -105,11 +105,8 @@ pub struct TipTrace {
 }
 
 /// Walks from a tip toward the body and stops at the first bend (the pivot).
-/// Returns the cells from the tip up to and including that corner.
-///
-/// # Panics
-///
-/// If `tip` does not hold a line tip pointing away from `body_dir`.
+/// Returns the cells from the tip up to and including that corner — or just the tip
+/// when nothing straight leads away from it.
 #[must_use]
 pub fn trace_line_from_tip(layer: &Layer, tip: Pos, body_dir: Direction) -> TipTrace {
     let mut cells = vec![tip];
@@ -132,7 +129,8 @@ pub fn trace_line_from_tip(layer: &Layer, tip: Pos, body_dir: Direction) -> TipT
         }
         break;
     }
-    let anchor = *cells.last().expect("the tip is always present");
+    // `cells` always holds at least the tip.
+    let anchor = cells.last().copied().unwrap_or(tip);
     TipTrace { cells, anchor }
 }
 

@@ -66,6 +66,32 @@ fn is_path_like(arg: &str) -> bool {
             .is_some_and(|e| e.eq_ignore_ascii_case("json"))
 }
 
+/// A drawing created from a text file. The name comes from the first positional
+/// argument when there is one, and from the file's own stem otherwise.
+fn import_drawing(
+    store: &DrawingStore,
+    file: &str,
+    base: Option<&str>,
+) -> Result<OpenDrawing, String> {
+    let text = std::fs::read_to_string(file).map_err(|_| format!("can't read {file}"))?;
+    let base = base.map_or_else(
+        || {
+            Path::new(file).file_stem().map_or_else(
+                || "imported".to_string(),
+                |s| s.to_string_lossy().to_string(),
+            )
+        },
+        ToString::to_string,
+    );
+    let name = store.unique_name(&base);
+    let layer = text_to_layer(&text, crate::core::vector::Pos::default());
+    let path = store.path_for(&name);
+    store
+        .save(&path, &name, &layer)
+        .map_err(|e| format!("can't write {}: {e}", path.display()))?;
+    Ok(OpenDrawing { path, name, layer })
+}
+
 /// Resolves a CLI argument to a drawing file path, if one exists.
 fn find_drawing(store: &DrawingStore, arg: &str) -> Option<PathBuf> {
     if is_path_like(arg) {
@@ -95,15 +121,18 @@ fn name_from_path(arg: &str) -> String {
         .to_string()
 }
 
-fn open_or_create(store: &DrawingStore, arg: &str) -> OpenDrawing {
+fn open_or_create(store: &DrawingStore, arg: &str) -> Result<OpenDrawing, String> {
     if let Some(existing) = find_drawing(store, arg) {
-        if let Ok((name, layer)) = store.load(&existing) {
-            return OpenDrawing {
-                path: existing,
-                name,
-                layer,
-            };
-        }
+        // A file this build cannot read — a drawing from a newer version, a
+        // half-written one, one worth repairing by hand — is never written over.
+        let (name, layer) = store
+            .load(&existing)
+            .map_err(|e| format!("can't open {}: {e}", existing.display()))?;
+        return Ok(OpenDrawing {
+            path: existing,
+            name,
+            layer,
+        });
     }
     let path = if is_path_like(arg) {
         absolute(arg)
@@ -115,14 +144,14 @@ fn open_or_create(store: &DrawingStore, arg: &str) -> OpenDrawing {
     } else {
         arg.to_string()
     };
-    if let Err(e) = store.save(&path, &name, &Layer::new()) {
-        fail(&format!("can't write {}: {e}", path.display()));
-    }
-    OpenDrawing {
+    store
+        .save(&path, &name, &Layer::new())
+        .map_err(|e| format!("can't write {}: {e}", path.display()))?;
+    Ok(OpenDrawing {
         path,
         name,
         layer: Layer::new(),
-    }
+    })
 }
 
 /// What to print and stop, if anything: the two flags that are not options.
@@ -202,11 +231,10 @@ fn open_pane_command() {
                 "focus": true,
             },
         });
-        let Ok(stream) = UnixStream::connect(&socket_path) else {
+        let Ok(mut stream) = UnixStream::connect(&socket_path) else {
             fail("cannot reach herdr");
         };
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        let mut stream = stream;
         if writeln!(stream, "{request}").is_err() {
             fail("cannot reach herdr");
         }
@@ -283,15 +311,30 @@ const fn system_clipboard() -> Clipboard {
     Clipboard::new(true)
 }
 
+/// Everything the app turns on, in the order the terminal wants it off: mouse
+/// reporting, the kitty keyboard flags, bracketed paste, then the alternate screen.
+/// The signal handler and the panic hook both write exactly these bytes.
+const RESTORE: &[u8] =
+    b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[<1u\x1b[?2004l\x1b[?1049l";
+
+/// Drops those modes for anything that unwinds past the event loop — a bug in the
+/// drawing code should not leave the user's shell echoing mouse escape codes.
+/// `ratatui::init` installs its own restoring hook, so this one chains onto it.
+fn install_panic_restore() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = std::io::stdout().write_all(RESTORE);
+        previous(info);
+    }));
+}
+
 /// Restores the terminal on SIGTERM/SIGHUP/SIGINT, which ctrl+q never sees.
 #[cfg(unix)]
 fn install_signal_restore() {
     extern "C" fn restore(_sig: libc::c_int) {
-        // Only async-signal-safe writes: leave the alternate screen, then drop the
-        // mouse/paste modes the app turned on.
-        const EXIT: &[u8] = b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1049l";
+        // Only async-signal-safe writes.
         unsafe {
-            libc::write(1, EXIT.as_ptr().cast(), EXIT.len());
+            libc::write(1, RESTORE.as_ptr().cast(), RESTORE.len());
         }
         unsafe { libc::_exit(0) };
     }
@@ -340,6 +383,7 @@ fn interactive(
         )
     );
     install_signal_restore();
+    install_panic_restore();
 
     // The `terminal` theme inherits the terminal's own colors, so ask before the
     // first frame; a terminal too slow to answer keeps the stand-in scheme.
@@ -412,24 +456,7 @@ pub fn main() {
     let config_path = crate::storage::config::config_path();
     let mut config = load_config(&config_path);
     let drawing = match parsed.import.as_deref() {
-        Some(file) => match std::fs::read_to_string(file) {
-            Ok(text) => {
-                let base = parsed.positional.first().cloned().unwrap_or_else(|| {
-                    Path::new(file).file_stem().map_or_else(
-                        || "imported".to_string(),
-                        |s| s.to_string_lossy().to_string(),
-                    )
-                });
-                let name = store.unique_name(&base);
-                let layer = text_to_layer(&text, crate::core::vector::Pos::default());
-                let path = store.path_for(&name);
-                if let Err(e) = store.save(&path, &name, &layer) {
-                    fail(&format!("can't write {}: {e}", path.display()));
-                }
-                OpenDrawing { path, name, layer }
-            }
-            Err(_) => fail(&format!("can't read {file}")),
-        },
+        Some(file) => import_drawing(&store, file, parsed.positional.first().map(String::as_str)),
         None => parsed.positional.first().map_or_else(
             || {
                 let last = config
@@ -446,9 +473,51 @@ pub fn main() {
             },
             |arg| open_or_create(&store, arg),
         ),
-    };
+    }
+    .unwrap_or_else(|e| fail(&e));
     config.last_drawing = Some(drawing.path.to_string_lossy().to_string());
     save_config(&config, &config_path);
 
     interactive(store, config, config_path, drawing)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{open_or_create, DrawingStore};
+
+    fn store(name: &str) -> (DrawingStore, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("rsdia-cli-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a writable temp dir");
+        (DrawingStore::new(dir.clone()), dir)
+    }
+
+    #[test]
+    fn a_drawing_this_build_cannot_read_is_not_written_over() {
+        let (store, dir) = store("unreadable");
+        let path = store.path_for("future");
+        // A drawing from a newer version, or a half-written one.
+        let original = r#"{"version":99,"name":"future","cells":[]}"#;
+        std::fs::write(&path, original).expect("writable");
+
+        let Err(err) = open_or_create(&store, "future") else {
+            panic!("an unreadable drawing must not be replaced");
+        };
+        assert!(err.starts_with("can't open"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("still there"),
+            original
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opening_a_free_name_creates_it() {
+        let (store, dir) = store("fresh");
+        let drawing = open_or_create(&store, "fresh one").expect("created");
+        assert_eq!(drawing.name, "fresh one");
+        assert!(drawing.path.exists());
+        assert!(drawing.layer.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

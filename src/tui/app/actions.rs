@@ -495,7 +495,7 @@ impl App {
                 if value == self.drawing.name {
                     return None;
                 }
-                if let Some(err) = self.name_error(value, Some(&self.drawing.name.clone())) {
+                if let Some(err) = self.name_error(value, Some(&self.drawing.name)) {
                     return Some(err);
                 }
                 self.editor.flush();
@@ -513,7 +513,7 @@ impl App {
                         self.persist_config();
                         None
                     }
-                    Err(e) => Some(format!("can't rename: {e}")),
+                    Err(e) => Some(e),
                 }
             }
             InputKind::ForkDrawing => {

@@ -228,6 +228,10 @@ impl ThemeName {
     }
 }
 
+/// A palette reply is a few hundred bytes; past this it is not one, and parsing it
+/// again on every poll would cost more than the whole startup wait.
+const OSC_REPLY_LIMIT: usize = 64 * 1024;
+
 /// How long startup waits for the terminal's answer before painting in the stand-in scheme.
 pub const PALETTE_WAIT_MS: u64 = 300;
 
@@ -461,27 +465,22 @@ fn terminal_scheme(term: &TerminalColors) -> Resolved {
 
 /// `term` is the terminal's detected palette, needed only by the `terminal` theme.
 /// Without it that theme falls back to a scheme, since there is nothing to inherit.
-///
-/// # Panics
-///
-/// If a theme's own colour literal is malformed; they are compile-time constants.
 #[must_use]
 pub fn palette(name: ThemeName, term: Option<&TerminalColors>) -> Palette {
-    let inherit =
-        name == ThemeName::Terminal && term.is_some_and(|t| !t.fg.is_empty() && !t.bg.is_empty());
-    let scheme = if inherit {
-        terminal_scheme(term.expect("checked above"))
-    } else {
-        Resolved::from(name.scheme())
-    };
-    let mut palette = tokens(&scheme, inherit);
-    if inherit {
+    // Only `terminal`, and only from a terminal that reported a foreground and a
+    // background, has anything to inherit.
+    let reported =
+        term.filter(|t| name == ThemeName::Terminal && !t.fg.is_empty() && !t.bg.is_empty());
+    let scheme = reported.map_or_else(|| Resolved::from(name.scheme()), terminal_scheme);
+    let mut palette = tokens(&scheme, reported.is_some());
+    if let Some(term) = reported {
         // The terminal reported a palette, so the chrome wears it: MS Edit's grey
         // menu/toolbar strip with black labels. Without a report the chrome stays
         // on the stand-in scheme, so it matches the canvas. `gutter` needs no
         // override — it is derived from the reported background either way.
         let at = |i: usize, fallback: &str| {
-            term.and_then(|t| t.ansi.get(i))
+            term.ansi
+                .get(i)
                 .and_then(Option::as_deref)
                 .map_or_else(|| rgb(fallback), rgb)
         };
@@ -567,6 +566,9 @@ fn unix_osc_query(timeout_ms: u64) -> Option<TerminalColors> {
         let Ok(n) = usize::try_from(read) else {
             break;
         };
+        if buf.len() >= OSC_REPLY_LIMIT {
+            break;
+        }
         buf.extend_from_slice(&chunk[..n]);
     }
     parse_osc_colors(&buf).filter(TerminalColors::is_complete)

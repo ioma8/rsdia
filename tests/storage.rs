@@ -29,6 +29,38 @@ fn save_load_round_trip_is_byte_identical() {
 }
 
 #[test]
+fn a_file_whose_stored_name_differs_still_reserves_its_name() {
+    let dir = temp_dir("reserved");
+    let store = DrawingStore::new(dir.join("store"));
+    // What a hand-edited, copied or externally-renamed file looks like: the path
+    // says one thing, the name inside says another.
+    let path = store.path_for("notes");
+    store
+        .save(
+            &path,
+            "Notes (v2)",
+            &text_to_layer("keep me", Pos::default()),
+        )
+        .expect("saved");
+
+    assert!(
+        store.exists("notes"),
+        "the path is taken whatever it is called inside"
+    );
+    assert_eq!(
+        store.unique_name("notes"),
+        "notes 2",
+        "so a new drawing picks another name"
+    );
+    assert_eq!(
+        store.load(&path).expect("still parses").0,
+        "Notes (v2)",
+        "and nothing saved over it"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn the_store_creates_lists_renames_and_deletes() {
     let dir = temp_dir("store");
     let store = DrawingStore::new(dir.join("store"));
