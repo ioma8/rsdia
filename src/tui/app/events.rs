@@ -163,15 +163,11 @@ impl App {
     }
 
     fn handle_key(&mut self, k: &KeyEvent) {
-        // Quitting works everywhere, dialogs and text sessions included. Copy has to
-        // move off ctrl+c for that, so it lives on the terminal's own copy chord and
-        // falls back to `copy on select` in the settings panel where the terminal
-        // cannot tell ctrl+shift+c apart from ctrl+c.
-        if is_ctrl(k, 'q') || (is_ctrl(k, 'c') && !is_shift(k)) {
+        // ctrl+c is the interrupt and works everywhere, dialogs and text sessions
+        // included; the clipboard is on the letters (and ctrl+x/ctrl+v) instead, so
+        // nothing here depends on the terminal reporting modifiers.
+        if is_ctrl(k, 'q') || is_ctrl(k, 'c') {
             return self.quit();
-        }
-        if is_ctrl(k, 'c') {
-            return self.copy_selection(false);
         }
         if self.dialog.is_some() {
             return self.dialog_key(k);
@@ -275,6 +271,19 @@ impl App {
         }
         if let Some(tool) = ch.and_then(tool_shortcut) {
             return self.set_tool(tool);
+        }
+        // yank / cut / put, the letters a vim user presses.
+        if ch == Some('y') {
+            return self.copy_selection(false);
+        }
+        if ch == Some('x') {
+            return self.copy_selection(true);
+        }
+        if ch == Some('p') {
+            if let Some(text) = self.clipboard.paste() {
+                self.paste_text(&text);
+            }
+            return;
         }
         if ch == Some('?') {
             let anchor = self.anchor_of(ItemId::Help);

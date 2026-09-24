@@ -414,10 +414,7 @@ fn select_copies_cuts_pastes_and_nudges() {
     h.drag(10, 10, 14, 12, MouseButton::Left);
     h.press('2');
     h.drag(8, 8, 16, 13, MouseButton::Left);
-    h.key(
-        KeyCode::Char('C'),
-        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
-    );
+    h.press('y');
     assert!(h
         .app
         .clipboard
@@ -436,6 +433,26 @@ fn select_copies_cuts_pastes_and_nudges() {
     h.app.clipboard.set_text("PASTED");
     h.key(KeyCode::Char('v'), KeyModifiers::CONTROL);
     assert_eq!(h.committed_len(), 6);
+}
+
+#[test]
+fn y_x_p_are_copy_cut_and_paste() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    h.drag(10, 10, 14, 12, MouseButton::Left);
+    h.press('2');
+    h.drag(8, 8, 16, 13, MouseButton::Left);
+    h.press('y');
+    assert!(h
+        .app
+        .clipboard
+        .text
+        .as_deref()
+        .expect("a copy")
+        .contains("┌───┐"));
+    h.press('x');
+    assert_eq!(h.committed_len(), 0);
+    h.press('p');
+    assert_eq!(h.committed_len(), 12, "the box is back");
 }
 
 #[test]

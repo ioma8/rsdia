@@ -338,10 +338,7 @@ const SHORTCUTS: [(&str, &str); 11] = [
         "ctrl+z  ctrl+y",
         "undo / redo (ctrl+shift+z with kitty keys)",
     ),
-    (
-        "ctrl+shift+c  ctrl+x  ctrl+v",
-        "copy / cut / paste selection",
-    ),
+    ("y  x  p  (ctrl+x ctrl+v)", "copy / cut / paste selection"),
     ("del  arrows", "erase / nudge selection"),
     ("f", "flip elbow while dragging a line or arrow"),
     ("scroll", "pan vertically, or horizontally with a trackpad"),
