@@ -55,14 +55,8 @@ pub struct InputDialog {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConfirmKind {
-    DeleteDrawing,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfirmDialog {
-    pub kind: ConfirmKind,
     pub title: String,
     pub message: String,
     pub yes: String,
@@ -74,25 +68,39 @@ pub enum Dialog {
     Confirm(ConfirmDialog),
 }
 
+impl ConfirmDialog {
+    /// The one thing a confirmation does today: delete the open drawing.
+    #[must_use]
+    pub fn delete_drawing(name: &str) -> Self {
+        Self {
+            title: "delete drawing".to_string(),
+            message: format!("delete \"{name}\"? this can't be undone."),
+            yes: "delete".to_string(),
+        }
+    }
+}
+
 impl Dialog {
+    #[must_use]
     pub fn title(&self) -> &str {
         match self {
-            Dialog::Input(d) => &d.title,
-            Dialog::Confirm(d) => &d.title,
+            Self::Input(d) => &d.title,
+            Self::Confirm(d) => &d.title,
         }
     }
 
-    pub fn input(&self) -> Option<&InputDialog> {
+    #[must_use]
+    pub const fn input(&self) -> Option<&InputDialog> {
         match self {
-            Dialog::Input(d) => Some(d),
-            Dialog::Confirm(_) => None,
+            Self::Input(d) => Some(d),
+            Self::Confirm(_) => None,
         }
     }
 
-    pub fn input_mut(&mut self) -> Option<&mut InputDialog> {
+    pub const fn input_mut(&mut self) -> Option<&mut InputDialog> {
         match self {
-            Dialog::Input(d) => Some(d),
-            Dialog::Confirm(_) => None,
+            Self::Input(d) => Some(d),
+            Self::Confirm(_) => None,
         }
     }
 }

@@ -1,6 +1,6 @@
 //! Box tool.
 //!
-//! Ported from ASCIIFlow (`client/draw/box.ts`), MIT © Lewis Hemens.
+//! Ported from `ASCIIFlow` (`client/draw/box.ts`), MIT © Lewis Hemens.
 
 use crate::core::canvas::Canvas;
 use crate::core::glyphs::UNICODE;
@@ -12,6 +12,7 @@ use std::collections::HashSet;
 
 use super::tool::{Mods, Tool};
 
+#[must_use]
 pub fn draw_box(b: Bounds) -> Layer {
     let mut layer = Layer::new();
     if b.right() != b.left() {

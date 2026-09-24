@@ -1,6 +1,6 @@
 //! Line and arrow tools.
 //!
-//! Ported from ASCIIFlow (`client/draw/line.ts`), MIT © Lewis Hemens.
+//! Ported from `ASCIIFlow` (`client/draw/line.ts`), MIT © Lewis Hemens.
 
 use std::collections::HashSet;
 
@@ -13,6 +13,7 @@ use crate::core::vector::Pos;
 use super::tool::{Key, Mods, Tool};
 
 /// Builds the scratch layer for a line/arrow drag.
+#[must_use]
 pub fn draw_line(committed: &Layer, start: Pos, end: Pos, is_arrow: bool, flip: bool) -> Layer {
     let horizontal_first = infer_horizontal_first(start, end, committed, flip);
     let mut layer = line(start, end, horizontal_first);
@@ -38,7 +39,8 @@ pub struct LineTool {
 }
 
 impl LineTool {
-    pub fn new(is_arrow: bool) -> Self {
+    #[must_use]
+    pub const fn new(is_arrow: bool) -> Self {
         Self {
             is_arrow,
             start_position: None,
@@ -47,7 +49,8 @@ impl LineTool {
         }
     }
 
-    pub fn active(&self) -> bool {
+    #[must_use]
+    pub const fn active(&self) -> bool {
         self.start_position.is_some()
     }
 

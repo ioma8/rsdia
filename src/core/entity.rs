@@ -1,7 +1,7 @@
 //! Entity detection (words, line tips, boxes) and moves that keep attached
 //! lines connected.
 //!
-//! Ported from ASCIIFlow (`client/draw/entity.ts`), MIT © Lewis Hemens.
+//! Ported from `ASCIIFlow` (`client/draw/entity.ts`), MIT © Lewis Hemens.
 
 use std::collections::HashSet;
 
@@ -14,11 +14,13 @@ use super::vector::{Direction, Pos};
 const H: char = UNICODE.line_horizontal;
 const V: char = UNICODE.line_vertical;
 
-pub fn is_content(c: char) -> bool {
+#[must_use]
+pub const fn is_content(c: char) -> bool {
     !is_erase(c)
 }
 
-pub fn is_text(c: char) -> bool {
+#[must_use]
+pub const fn is_text(c: char) -> bool {
     is_content(c) && !is_box_drawing(c)
 }
 
@@ -49,6 +51,7 @@ pub struct LineTip {
 }
 
 /// The free end of a line or arrow under `p`, if any.
+#[must_use]
 pub fn detect_line_tip(layer: &Layer, p: Pos) -> Option<LineTip> {
     let value = layer.get(p)?;
     let horizontal = match value {
@@ -81,14 +84,14 @@ pub fn detect_line_tip(layer: &Layer, p: Pos) -> Option<LineTip> {
     })
 }
 
-fn is_bend(c: char) -> bool {
+const fn is_bend(c: char) -> bool {
     c == UNICODE.corner_top_left
         || c == UNICODE.corner_top_right
         || c == UNICODE.corner_bottom_right
         || c == UNICODE.corner_bottom_left
 }
 
-fn straight_char_for(d: Direction) -> char {
+const fn straight_char_for(d: Direction) -> char {
     if d.is_horizontal() {
         H
     } else {
@@ -103,6 +106,11 @@ pub struct TipTrace {
 
 /// Walks from a tip toward the body and stops at the first bend (the pivot).
 /// Returns the cells from the tip up to and including that corner.
+///
+/// # Panics
+///
+/// If `tip` does not hold a line tip pointing away from `body_dir`.
+#[must_use]
 pub fn trace_line_from_tip(layer: &Layer, tip: Pos, body_dir: Direction) -> TipTrace {
     let mut cells = vec![tip];
     let mut current = tip.add(body_dir.delta());
@@ -228,9 +236,7 @@ fn border_component(layer: &Layer, start: Pos) -> Option<Vec<Pos>> {
 pub fn find_box(layer: &Layer, p: Pos) -> Option<Bounds> {
     let mut candidates: Vec<Bounds> = Vec::new();
     let mut seeds: Vec<Pos> = Vec::new();
-    if !layer.get(p).is_some_and(is_box_drawing) {
-        seeds.push(p);
-    } else {
+    if layer.get(p).is_some_and(is_box_drawing) {
         for d in Direction::ALL
             .into_iter()
             .map(Direction::delta)
@@ -241,6 +247,8 @@ pub fn find_box(layer: &Layer, p: Pos) -> Option<Bounds> {
                 seeds.push(n);
             }
         }
+    } else {
+        seeds.push(p);
     }
     for seed in seeds {
         if let Some(b) = box_from_seed(layer, seed) {
@@ -269,6 +277,7 @@ pub fn find_box(layer: &Layer, p: Pos) -> Option<Bounds> {
         })
 }
 
+#[must_use]
 pub fn cells_in_box(layer: &Layer, b: Bounds) -> Vec<Pos> {
     let mut out = Vec::new();
     for (p, v) in layer.entries() {
@@ -283,6 +292,7 @@ pub fn cells_in_box(layer: &Layer, b: Bounds) -> Vec<Pos> {
 }
 
 /// Translates `cells` by `delta`, snapping the surrounding structure.
+#[must_use]
 pub fn move_cells(committed: &Layer, cells: &[Pos], delta: Pos) -> Layer {
     let mut layer = Layer::new();
     for &c in cells {
@@ -337,6 +347,7 @@ fn perimeter(b: Bounds) -> Vec<(Pos, Direction)> {
 }
 
 /// Lines leaving `box`, each followed through corners to its terminal.
+#[must_use]
 pub fn trace_box_attachments(layer: &Layer, b: Bounds) -> Vec<BoxAttachment> {
     let mut attachments = Vec::new();
     for (anchor, out) in perimeter(b) {
@@ -354,13 +365,12 @@ pub fn trace_box_attachments(layer: &Layer, b: Bounds) -> Vec<BoxAttachment> {
             continue;
         }
 
-        let mut run_cells = Vec::new();
         let mut dir = out;
-        let mut current = first;
-        if arrow_into_box {
-            run_cells.push(first);
-            current = behind;
-        }
+        let (mut run_cells, mut current) = if arrow_into_box {
+            (vec![first], behind)
+        } else {
+            (Vec::new(), first)
+        };
         for _ in 0..1000 {
             let value = layer.get(current);
             if value == Some(straight_char_for(dir)) {
@@ -432,11 +442,12 @@ fn draw_connector(layer: &mut Layer, from: Pos, to: Pos, out: Direction, far_val
         Pos::new(from.x, to.y)
     };
     draw_straight(layer, from, bend, bend == to);
-    let mut approach = out.delta();
-    if bend != to {
+    let approach = if bend == to {
+        out.delta()
+    } else {
         draw_straight(layer, bend, to, true);
-        approach = Pos::new((to.x - bend.x).signum(), (to.y - bend.y).signum());
-    }
+        Pos::new((to.x - bend.x).signum(), (to.y - bend.y).signum())
+    };
     if bend != from && bend != to {
         let next = if horizontal_first {
             if to.y > bend.y {
@@ -466,6 +477,7 @@ fn draw_connector(layer: &mut Layer, from: Pos, to: Pos, out: Direction, far_val
 }
 
 /// Moves a box and its contents by `delta`, reflowing attached lines.
+#[must_use]
 pub fn move_box_with_attachments(
     committed: &Layer,
     b: Bounds,

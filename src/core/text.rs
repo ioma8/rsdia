@@ -1,59 +1,58 @@
 //! Layer <-> plain text.
 //!
-//! Ported from ASCIIFlow (`client/text_utils.ts`), MIT © Lewis Hemens.
+//! Ported from `ASCIIFlow` (`client/text_utils.ts`), MIT © Lewis Hemens.
 
 use unicode_width::UnicodeWidthChar;
 
 use super::grid::{bounding_box, Bounds};
 use super::layer::Layer;
-use super::vector::Pos;
+use super::vector::{index, units, Pos};
 
-fn is_control(c: char) -> bool {
+const fn is_control(c: char) -> bool {
     (c as u32) < 32 || c as u32 == 127
 }
 
 /// Terminal display width of a single code point: 0, 1 or 2.
+#[must_use]
 pub fn char_width(c: char) -> usize {
     c.width().unwrap_or(0)
 }
 
 /// Text tool / import only accept single-width printable characters.
+#[must_use]
 pub fn is_placeable(c: char) -> bool {
     !is_control(c) && char_width(c) == 1
 }
 
 /// Renders the layer as text. Without `bounds`, uses the bounding box of all
-/// non-empty cells. Trailing spaces are kept when a box is given (ASCIIFlow
+/// non-empty cells. Trailing spaces are kept when a box is given (`ASCIIFlow`
 /// behaviour); `trim_right` strips them per row.
+#[must_use]
 pub fn layer_to_text(layer: &Layer, bounds: Option<Bounds>, trim_right: bool) -> String {
     let cells: Vec<Pos> = layer
         .positions()
         .filter(|p| layer.get(*p).is_some())
         .collect();
-    let bounds = match bounds.or_else(|| bounding_box(cells.iter().copied())) {
-        Some(b) => b,
-        None => return String::new(),
+    let Some(bounds) = bounds.or_else(|| bounding_box(cells.iter().copied())) else {
+        return String::new();
     };
-    let (w, h) = (
-        bounds.width().max(0) as usize,
-        bounds.height().max(0) as usize,
-    );
-    let mut rows: Vec<Vec<char>> = vec![vec![' '; w]; h];
+    let (width, height) = (index(bounds.width().max(0)), index(bounds.height().max(0)));
+    let mut rows: Vec<Vec<char>> = vec![vec![' '; width]; height];
     for p in cells {
         if !bounds.contains(p) {
             continue;
         }
-        let Some(mut v) = layer.get(p) else { continue };
-        if is_control(v) {
-            v = ' ';
+        let Some(mut glyph) = layer.get(p) else {
+            continue;
+        };
+        if is_control(glyph) {
+            glyph = ' ';
         }
-        let (x, y) = (
-            (p.x - bounds.left()) as usize,
-            (p.y - bounds.top()) as usize,
-        );
+        let x = index(p.x - bounds.left());
+        let y = index(p.y - bounds.top());
         if let Some(row) = rows.get_mut(y) {
             if let Some(cell) = row.get_mut(x) {
-                *cell = v;
+                *cell = glyph;
             }
         }
     }
@@ -73,6 +72,7 @@ pub fn layer_to_text(layer: &Layer, bounds: Option<Bounds>, trim_right: bool) ->
 
 /// Loads text at `offset`. Spaces and control characters are skipped; wide
 /// characters are replaced with `?` so the grid stays aligned.
+#[must_use]
 pub fn text_to_layer(value: &str, offset: Pos) -> Layer {
     let mut layer = Layer::new();
     let normalized = value
@@ -83,7 +83,7 @@ pub fn text_to_layer(value: &str, offset: Pos) -> Layer {
         for (x, ch) in line.chars().enumerate() {
             if ch != ' ' && !is_control(ch) {
                 layer.set(
-                    Pos::new(x as i32, y as i32).add(offset),
+                    Pos::new(units(x), units(y)).add(offset),
                     if char_width(ch) == 1 { ch } else { '?' },
                 );
             }
@@ -93,6 +93,7 @@ pub fn text_to_layer(value: &str, offset: Pos) -> Layer {
 }
 
 /// Size of a block of text in cells.
+#[must_use]
 pub fn text_size(value: &str) -> Pos {
     // `\r\n` and a lone `\r` both become `\n`, matching ASCIIFlow's regex.
     let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
@@ -102,7 +103,7 @@ pub fn text_size(value: &str) -> Pos {
         width = width.max(line.chars().count());
         lines += 1;
     }
-    Pos::new(width as i32, lines)
+    Pos::new(units(width), lines)
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 //! Routes input to the active tool. The terminal-free counterpart of
-//! ASCIIFlow's store + controller: tests drive it directly.
+//! `ASCIIFlow`'s store + controller: tests drive it directly.
 
 use super::canvas::Canvas;
 use super::tools::box_tool::BoxTool;
@@ -30,14 +30,15 @@ pub const TOOL_IDS: [ToolId; 6] = [
 ];
 
 impl ToolId {
-    pub fn name(self) -> &'static str {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
         match self {
-            ToolId::Box => "box",
-            ToolId::Select => "select",
-            ToolId::Arrow => "arrow",
-            ToolId::Line => "line",
-            ToolId::Text => "text",
-            ToolId::Eraser => "eraser",
+            Self::Box => "box",
+            Self::Select => "select",
+            Self::Arrow => "arrow",
+            Self::Line => "line",
+            Self::Text => "text",
+            Self::Eraser => "eraser",
         }
     }
 }
@@ -62,10 +63,12 @@ impl Default for Editor {
 }
 
 impl Editor {
+    #[must_use]
     pub fn new() -> Self {
         Self::with_canvas(Canvas::new())
     }
 
+    #[must_use]
     pub fn with_canvas(canvas: Canvas) -> Self {
         Self {
             canvas,
@@ -80,11 +83,13 @@ impl Editor {
         }
     }
 
-    pub fn tool(&self) -> ToolId {
+    #[must_use]
+    pub const fn tool(&self) -> ToolId {
         self.tool_id
     }
 
-    pub fn text(&self) -> &TextTool {
+    #[must_use]
+    pub const fn text(&self) -> &TextTool {
         &self.text_tool
     }
 
@@ -96,14 +101,17 @@ impl Editor {
         self.select_tool.cleanup(canvas);
     }
 
-    pub fn has_selection(&self) -> bool {
+    #[must_use]
+    pub const fn has_selection(&self) -> bool {
         self.select_tool.has_selection(&self.canvas)
     }
 
+    #[must_use]
     pub fn selection_top_left(&self) -> Option<Pos> {
         self.select_tool.select_box.map(|b| b.top_left())
     }
 
+    #[must_use]
     pub fn copy_selection(&self) -> Option<String> {
         self.select_tool.copy_selection(&self.canvas)
     }
@@ -123,6 +131,7 @@ impl Editor {
         self.text_tool.undo_keystroke(canvas)
     }
 
+    #[must_use]
     pub fn text_last_typed_space(&self) -> bool {
         self.text_tool.last_typed_space()
     }
@@ -142,6 +151,7 @@ impl Editor {
     }
 
     /// Printable keys belong to the text tool rather than shortcuts.
+    #[must_use]
     pub fn text_entry(&self) -> bool {
         self.tool_id == ToolId::Text && self.text_tool.editing()
     }
@@ -204,6 +214,7 @@ impl Editor {
     }
 
     /// Whether the cell under the pointer is something the active tool would grab.
+    #[must_use]
     pub fn hover_is_target(&self, p: Pos, m: Mods) -> bool {
         match self.tool_id {
             ToolId::Box => self.box_tool.hover_is_target(&self.canvas, p, m),

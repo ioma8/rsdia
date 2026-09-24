@@ -1,7 +1,22 @@
 //! What the app does once a click, key or dialog lands: panels, dialogs,
 //! files, export and settings.
 
-use super::*;
+use super::{expand_path, is_menu, panel_for, App, OpenDrawing, CHIP_MS};
+use crate::core::canvas::Canvas;
+use crate::core::editor::ToolId;
+use crate::core::export::{export_text, ExportConfig};
+use crate::core::layer::Layer;
+use crate::core::text::{text_size, text_to_layer};
+use crate::core::vector::{index, units, Pos};
+use crate::storage::config::GridStyle;
+use crate::storage::drawings::slugify;
+use crate::tui::host::{ConfirmDialog, Dialog, InputDialog, InputKind};
+use crate::tui::painter::{Action, ItemId, PanelId};
+use crate::tui::popovers::{menu_entries, menu_entry_disabled};
+use crate::tui::theme::ThemeName;
+use crate::tui::toolbar::{menu_anchor, menu_panels};
+use std::path::Path;
+use std::time::{Duration, Instant};
 
 impl App {
     pub fn undo(&mut self) {
@@ -14,7 +29,7 @@ impl App {
 
     pub fn set_tool(&mut self, id: ToolId) {
         self.editor.set_tool(id);
-        self.hover_is_target = false;
+        self.pointer.on_target = false;
         self.chips_until = Instant::now() + Duration::from_millis(CHIP_MS);
     }
 
@@ -66,13 +81,13 @@ impl App {
             self.list_selection = None;
             return;
         }
-        let last = self.drawings.len() as i32 - 1;
-        let at = self.list_selection.unwrap_or(0) as i32 + step;
-        self.list_selection = Some(at.clamp(0, last) as usize);
+        let last = units(self.drawings.len()) - 1;
+        let at = units(self.list_selection.unwrap_or(0)) + step;
+        self.list_selection = Some(index(at.clamp(0, last)));
     }
 
     /// Selects the first or last drawing.
-    pub(crate) fn select_list_edge(&mut self, end: bool) {
+    pub(crate) const fn select_list_edge(&mut self, end: bool) {
         if self.drawings.is_empty() {
             return;
         }
@@ -82,8 +97,9 @@ impl App {
 
     /// Scrolls the export preview by `step` lines.
     pub(crate) fn scroll_preview(&mut self, step: i32) {
-        let lines = self.export_preview().lines().count() as i32;
-        self.preview_top = (self.preview_top as i32 + step).clamp(0, (lines - 1).max(0)) as usize;
+        let last = self.export_preview().lines().count().saturating_sub(1);
+        let at = index(units(self.preview_top) + step);
+        self.preview_top = at.min(last);
     }
 
     /// Opens the selected drawing, if there is one.
@@ -102,8 +118,8 @@ impl App {
         let Some(at) = panels.iter().position(|p| *p == panel) else {
             return;
         };
-        let next = (at as i32 + step).rem_euclid(panels.len() as i32) as usize;
-        self.open_menu(panels[next]);
+        let next = (units(at) + step).rem_euclid(units(panels.len()));
+        self.open_menu(panels[index(next)]);
     }
 
     /// Moves the highlight, skipping entries with nothing to act on and stopping
@@ -113,11 +129,15 @@ impl App {
             return;
         };
         let entries = menu_entries(panel);
-        let mut at = self.menu_index as i32 + step;
-        while at >= 0 && (at as usize) < entries.len() {
-            let (id, _, _) = entries[at as usize];
+        let mut at = units(self.menu_index) + step;
+        while at >= 0 {
+            let next = index(at);
+            if next >= entries.len() {
+                return;
+            }
+            let (id, _, _) = entries[next];
             if !menu_entry_disabled(self, id) {
-                self.menu_index = at as usize;
+                self.menu_index = next;
                 return;
             }
             at += step;
@@ -138,7 +158,7 @@ impl App {
         }
     }
 
-    pub fn close_panel(&mut self) {
+    pub const fn close_panel(&mut self) {
         self.panel = None;
     }
 
@@ -283,11 +303,9 @@ impl App {
             return;
         };
         match dialog {
-            Dialog::Confirm(confirm) => {
+            Dialog::Confirm(_) => {
                 self.dialog = None;
-                if confirm.kind == ConfirmKind::DeleteDrawing {
-                    self.confirm_delete();
-                }
+                self.confirm_delete();
             }
             Dialog::Input(input) => {
                 let value = input.value.trim().to_string();
@@ -344,7 +362,7 @@ impl App {
     fn switch_to(&mut self, d: OpenDrawing) {
         self.editor.cancel_gesture();
         self.editor.flush();
-        if self.dirty || self.save_at.is_some() {
+        if self.save.dirty || self.save.due.is_some() {
             self.save();
         }
         self.placing = None;
@@ -383,20 +401,17 @@ impl App {
     }
 
     pub fn delete_drawing(&mut self) {
-        self.open_dialog(Dialog::Confirm(crate::tui::host::ConfirmDialog {
-            kind: ConfirmKind::DeleteDrawing,
-            title: "delete drawing".to_string(),
-            message: format!("delete \"{}\"? this can't be undone.", self.drawing.name),
-            yes: "delete".to_string(),
-        }));
+        self.open_dialog(Dialog::Confirm(ConfirmDialog::delete_drawing(
+            &self.drawing.name,
+        )));
     }
 
     fn confirm_delete(&mut self) {
         // Settle pending edits first so autosave can't recreate the file.
         self.editor.cancel_gesture();
         self.editor.flush();
-        self.save_at = None;
-        self.dirty = false;
+        self.save.due = None;
+        self.save.dirty = false;
         self.store.delete(&self.drawing.path);
         if let Some(next) = self.store.list().into_iter().next() {
             if let Ok((name, layer)) = self.store.load(&next.path) {
@@ -490,9 +505,9 @@ impl App {
                     .rename(&drawing.path, value, &self.editor.canvas.committed)
                 {
                     Ok(path) => {
-                        self.drawing.path = path.clone();
+                        self.drawing.path.clone_from(&path);
                         self.drawing.name = value.to_string();
-                        self.dirty = false;
+                        self.save.dirty = false;
                         self.drawings = self.store.list();
                         self.config.last_drawing = Some(path.to_string_lossy().to_string());
                         self.persist_config();
@@ -509,7 +524,7 @@ impl App {
                 let layer = self.editor.canvas.committed.clone();
                 let path = self.store.path_for(value);
                 match self.store.save(&path, value, &layer) {
-                    Ok(_) => {
+                    Ok(()) => {
                         self.switch_to(OpenDrawing {
                             path,
                             name: value.to_string(),
@@ -523,13 +538,13 @@ impl App {
             }
             InputKind::ImportText => {
                 let path = expand_path(value);
-                match std::fs::read_to_string(&path) {
-                    Ok(text) => {
+                std::fs::read_to_string(&path).map_or_else(
+                    |_| Some("can't read that file".to_string()),
+                    |text| {
                         self.start_placing(&text);
                         None
-                    }
-                    Err(_) => Some("can't read that file".to_string()),
-                }
+                    },
+                )
             }
             InputKind::SaveExport => {
                 let path = expand_path(value);
@@ -584,7 +599,7 @@ impl App {
         self.apply_theme();
     }
 
-    pub fn recenter(&mut self) {
+    pub const fn recenter(&mut self) {
         self.recenter_soon = true;
     }
 }

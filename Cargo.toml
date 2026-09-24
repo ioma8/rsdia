@@ -28,3 +28,10 @@ path = "src/main.rs"
 [profile.release]
 lto = true
 strip = true
+
+# Strict clippy: `cargo clippy --all-targets` must stay clean, so these are errors
+# rather than suggestions.
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }

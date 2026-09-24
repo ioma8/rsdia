@@ -1,6 +1,6 @@
-//! ASCIIFlow's own spec files, ported verbatim into Rust.
+//! `ASCIIFlow`'s own spec files, ported verbatim into Rust.
 //!
-//! Ported from ASCIIFlow (`client/draw/*.spec.ts`, `client/snap.spec.ts`),
+//! Ported from `ASCIIFlow` (`client/draw/*.spec.ts`, `client/snap.spec.ts`),
 //! MIT © Lewis Hemens. Only the harness is rewritten; the assertions are upstream's.
 //! The snap spec lives in `src/core/snap.rs` next to the code it covers.
 
@@ -13,7 +13,7 @@ use rsdia::core::text::{layer_to_text, text_to_layer};
 use rsdia::core::tools::tool::Mods;
 use rsdia::core::vector::Pos;
 
-fn v(x: i32, y: i32) -> Pos {
+const fn v(x: i32, y: i32) -> Pos {
     Pos::new(x, y)
 }
 
@@ -69,7 +69,7 @@ fn box_connects_to_a_line_that_terminates_on_an_edge() {
 fn detect_word_selects_a_contiguous_run_of_text_stopping_at_spaces() {
     let layer = from_text(&["hi there"]);
     let word = detect_word(&layer, v(4, 0)).expect("a word");
-    let found: Vec<String> = word.iter().map(|p| p.to_string()).collect();
+    let found: Vec<String> = word.iter().map(std::string::ToString::to_string).collect();
     assert_eq!(found, vec!["3:0", "4:0", "5:0", "6:0", "7:0"]);
 }
 

@@ -1,12 +1,13 @@
 //! Straight and single-elbow line routing, plus endpoint connection and
 //! orientation inference for the line/arrow tools.
 //!
-//! Ported from ASCIIFlow (`client/draw/utils.ts`, `client/draw/line.ts`), MIT © Lewis Hemens.
+//! Ported from `ASCIIFlow` (`client/draw/utils.ts`, `client/draw/line.ts`), MIT © Lewis Hemens.
 
 use super::glyphs::{connect_all, connectable, connects, disconnect_all, is_special, UNICODE};
 use super::layer::Layer;
 use super::vector::{Direction, Pos};
 
+#[must_use]
 pub fn line(start: Pos, end: Pos, horizontal_first: bool) -> Layer {
     if start.x == end.x || start.y == end.y {
         return straight_line(start, end);
@@ -14,6 +15,7 @@ pub fn line(start: Pos, end: Pos, horizontal_first: bool) -> Layer {
     corner_line(start, end, horizontal_first)
 }
 
+#[must_use]
 pub fn corner_line(start: Pos, end: Pos, horizontal_first: bool) -> Layer {
     let corner = if horizontal_first {
         Pos::new(end.x, start.y)
@@ -43,6 +45,12 @@ pub fn corner_line(start: Pos, end: Pos, horizontal_first: bool) -> Layer {
     layer
 }
 
+/// A one-cell-wide run between two points on the same row or column.
+///
+/// # Panics
+///
+/// If the points share neither a row nor a column.
+#[must_use]
 pub fn straight_line(start: Pos, end: Pos) -> Layer {
     let mut layer = Layer::new();
     assert!(
@@ -65,7 +73,8 @@ pub fn straight_line(start: Pos, end: Pos) -> Layer {
 }
 
 /// Arrow head glyph at `end` for a route from `start`.
-pub fn arrow_head(start: Pos, end: Pos, horizontal_first: bool) -> char {
+#[must_use]
+pub const fn arrow_head(start: Pos, end: Pos, horizontal_first: bool) -> char {
     if end.x == start.x {
         return if end.y < start.y {
             UNICODE.arrow_up
@@ -93,43 +102,30 @@ pub fn arrow_head(start: Pos, end: Pos, horizontal_first: bool) -> char {
     }
 }
 
-/// Structure around a cell, as eight booleans.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CellContext {
-    pub left: bool,
-    pub right: bool,
-    pub up: bool,
-    pub down: bool,
-    pub left_up: bool,
-    pub left_down: bool,
-    pub right_up: bool,
-    pub right_down: bool,
+/// Whether structure runs vertically through `c`: a neighbour above and below it,
+/// or the two arms of an elbow on the same side of it.
+fn runs_vertically(c: Pos, layer: &Layer) -> bool {
+    let s = |v: Pos| layer.get(v).is_some_and(is_special);
+    (s(c.up()) && s(c.down()))
+        || (s(c.left().up()) && s(c.left().down()))
+        || (s(c.right().up()) && s(c.right().down()))
 }
 
-pub fn cell_context(p: Pos, layer: &Layer) -> CellContext {
+/// The same, horizontally.
+fn runs_horizontally(c: Pos, layer: &Layer) -> bool {
     let s = |v: Pos| layer.get(v).is_some_and(is_special);
-    CellContext {
-        left: s(p.left()),
-        right: s(p.right()),
-        up: s(p.up()),
-        down: s(p.down()),
-        left_up: s(p.left().up()),
-        left_down: s(p.left().down()),
-        right_up: s(p.right().up()),
-        right_down: s(p.right().down()),
-    }
+    (s(c.left()) && s(c.right()))
+        || (s(c.left().up()) && s(c.right().up()))
+        || (s(c.left().down()) && s(c.right().down()))
 }
 
 /// Elbow orientation for a drag from `start` to `end`, inferred from the
 /// structure around both endpoints. `flip` reverses the inference.
+#[must_use]
 pub fn infer_horizontal_first(start: Pos, end: Pos, committed: &Layer, flip: bool) -> bool {
-    let s = cell_context(start, committed);
-    let e = cell_context(end, committed);
-    let horizontal_start =
-        (s.up && s.down) || (s.left_up && s.left_down) || (s.right_up && s.right_down);
-    let vertical_end =
-        (e.left && e.right) || (e.left_up && e.right_up) || (e.left_down && e.right_down);
-    (horizontal_start || vertical_end) != flip
+    // A vertical run where the drag starts, or a horizontal one where it ends,
+    // means the elbow should turn left/right first.
+    (runs_vertically(start, committed) || runs_horizontally(end, committed)) != flip
 }
 
 fn combined_get(layer: &Layer, base: &Layer, p: Pos) -> Option<char> {

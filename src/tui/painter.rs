@@ -1,7 +1,7 @@
 //! Drawing helpers over a ratatui buffer, plus click hotspots.
 //!
 //! ratatui emits no click event either, so a click is a down and an up on the same
-//! hotspot — the same rule the OpenTUI front end used.
+//! hotspot — the same rule the `OpenTUI` front end used.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect as URect;
@@ -13,6 +13,7 @@ use ratatui::widgets::{
 
 use crate::core::editor::ToolId;
 use crate::core::export::{Charset, Wrapper};
+use crate::core::vector::{px, units};
 use crate::storage::config::GridStyle;
 use crate::tui::theme::{Palette, ThemeName};
 
@@ -46,7 +47,6 @@ pub enum Action {
 /// A toolbar entry. `quit` has no place on the bar; it is a menu-only entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemId {
-    Menu,
     Files,
     Export,
     Undo,
@@ -81,86 +81,73 @@ pub struct Rect {
     pub h: i32,
 }
 
-pub fn in_rect(r: Rect, x: i32, y: i32) -> bool {
+#[must_use]
+pub const fn in_rect(r: Rect, x: i32, y: i32) -> bool {
     x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
 }
 
 /// The app lays out in `i32` so a drag outside the screen cannot underflow; the
 /// widgets below want ratatui's `u16` rect, so the two meet here.
+#[must_use]
 pub fn to_area(r: Rect) -> URect {
     URect {
-        x: r.x.max(0) as u16,
-        y: r.y.max(0) as u16,
-        width: r.w.max(0) as u16,
-        height: r.h.max(0) as u16,
+        x: px(r.x.max(0)),
+        y: px(r.y.max(0)),
+        width: px(r.w.max(0)),
+        height: px(r.h.max(0)),
     }
 }
 
+#[must_use]
 pub fn from_area(a: URect) -> Rect {
     Rect {
-        x: a.x as i32,
-        y: a.y as i32,
-        w: a.width as i32,
-        h: a.height as i32,
+        x: i32::from(a.x),
+        y: i32::from(a.y),
+        w: i32::from(a.width),
+        h: i32::from(a.height),
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hotspot {
     pub action: Action,
-    pub x: i32,
-    pub y: i32,
-    pub w: i32,
-    pub h: i32,
+    pub rect: Rect,
 }
 
+#[must_use]
 pub fn hotspot_at(hotspots: &[Hotspot], x: i32, y: i32) -> Option<Action> {
     // Later hotspots are drawn on top.
     hotspots
         .iter()
         .rev()
-        .find(|h| {
-            in_rect(
-                Rect {
-                    x: h.x,
-                    y: h.y,
-                    w: h.w,
-                    h: h.h,
-                },
-                x,
-                y,
-            )
-        })
+        .find(|h| in_rect(h.rect, x, y))
         .map(|h| h.action)
 }
 
-/// Button styling. A `Btn::default()` is a plain, enabled label.
+/// Button styling. A `Btn::default()` is a plain, enabled label; `active_color`
+/// is what marks the current choice, drawn BOLD in that colour.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Btn {
     pub fg: Option<Color>,
-    pub active: bool,
     pub active_color: Option<Color>,
     pub disabled: bool,
 }
 
 impl Btn {
-    pub fn fg(mut self, c: Color) -> Self {
+    #[must_use]
+    pub const fn fg(mut self, c: Color) -> Self {
         self.fg = Some(c);
         self
     }
 
-    pub fn active(mut self, yes: bool) -> Self {
-        self.active = yes;
+    #[must_use]
+    pub const fn active_color(mut self, c: Option<Color>) -> Self {
+        self.active_color = c;
         self
     }
 
-    pub fn active_color(mut self, c: Color) -> Self {
-        self.active = true;
-        self.active_color = Some(c);
-        self
-    }
-
-    pub fn disabled(mut self, yes: bool) -> Self {
+    #[must_use]
+    pub const fn disabled(mut self, yes: bool) -> Self {
         self.disabled = yes;
         self
     }
@@ -182,7 +169,7 @@ impl<'a> Painter<'a> {
     pub fn new(buf: &'a mut Buffer, pal: Palette, hover: Option<(i32, i32)>) -> Self {
         let (width, height) = {
             let area = buf.area();
-            (area.width as i32, area.height as i32)
+            (i32::from(area.width), i32::from(area.height))
         };
         Self {
             buf,
@@ -196,7 +183,7 @@ impl<'a> Painter<'a> {
     }
 
     /// The buffer, for the few widgets a popover renders itself.
-    pub(crate) fn buf_mut(&mut self) -> &mut Buffer {
+    pub(crate) const fn buf_mut(&mut self) -> &mut Buffer {
         self.buf
     }
 
@@ -205,55 +192,43 @@ impl<'a> Painter<'a> {
         to_area(r).clamp(URect::new(
             0,
             0,
-            self.width.max(0) as u16,
-            self.height.max(0) as u16,
+            px(self.width.max(0)),
+            px(self.height.max(0)),
         ))
     }
 
     /// Makes a rectangle clickable. Hotspots hold data, not closures.
-    pub fn hotspot(&mut self, action: Action, r: Rect) {
-        self.hotspots.push(Hotspot {
-            action,
-            x: r.x,
-            y: r.y,
-            w: r.w,
-            h: r.h,
-        });
+    pub fn hotspot(&mut self, action: Action, rect: Rect) {
+        self.hotspots.push(Hotspot { action, rect });
     }
 
     pub fn cell(&mut self, x: i32, y: i32, sym: &str, fg: Color, bg: Color, modifier: Modifier) {
         if x < 0 || y < 0 || x >= self.width || y >= self.height {
             return;
         }
-        if let Some(cell) = self.buf.cell_mut((x as u16, y as u16)) {
+        if let Some(cell) = self.buf.cell_mut((px(x), px(y))) {
             cell.set_symbol(sym)
                 .set_style(Style::default().fg(fg).bg(bg).add_modifier(modifier));
         }
     }
 
-    /// Writes single-width text, clipped to the screen. Returns the x after the text.
+    /// Writes single-width text in two colours, clipped to the screen. Returns the
+    /// x after the text. [`Painter::text_clipped`] takes a full style instead.
     pub fn text(&mut self, x: i32, y: i32, s: &str, fg: Color, bg: Color) -> i32 {
-        self.text_clipped(x, y, s, fg, bg, Modifier::empty(), self.width)
+        self.text_clipped(x, y, s, Style::new().fg(fg).bg(bg), self.width)
     }
 
-    // Immediate-mode cell writer: the parameters are the buffer's own
-    // (x, y, text, fg, bg, modifier, clip).
-    #[allow(clippy::too_many_arguments)]
-    pub fn text_clipped(
-        &mut self,
-        mut x: i32,
-        y: i32,
-        s: &str,
-        fg: Color,
-        bg: Color,
-        modifier: Modifier,
-        max_x: i32,
-    ) -> i32 {
+    /// The same, stopping at `max_x` — the buffer's own (x, y, text, style, max width).
+    pub fn text_clipped(&mut self, mut x: i32, y: i32, s: &str, style: Style, max_x: i32) -> i32 {
+        let (fg, bg) = (
+            style.fg.unwrap_or(Color::Reset),
+            style.bg.unwrap_or(Color::Reset),
+        );
         for ch in s.chars() {
             if x >= max_x {
                 break;
             }
-            self.cell(x, y, &ch.to_string(), fg, bg, modifier);
+            self.cell(x, y, &ch.to_string(), fg, bg, style.add_modifier);
             x += 1;
         }
         x
@@ -268,10 +243,6 @@ impl<'a> Painter<'a> {
     }
 
     /// Bordered panel; registers the area as chrome.
-    pub fn panel(&mut self, r: Rect, border: Color, bg: Color) {
-        self.titled_panel(r, border, bg, None, None);
-    }
-
     /// A panel with a title in its top border and an optional right-aligned note in
     /// the bottom one — where "12/27 drawings" and the like belong, rather than
     /// overprinting a row. Returns the area inside the border.
@@ -346,6 +317,7 @@ impl<'a> Painter<'a> {
         StatefulWidget::render(list, area, self.buf, &mut state);
     }
 
+    #[must_use]
     pub fn is_hover(&self, x: i32, y: i32, w: i32, h: i32) -> bool {
         self.hover
             .is_some_and(|(hx, hy)| in_rect(Rect { x, y, w, h }, hx, hy))
@@ -353,35 +325,38 @@ impl<'a> Painter<'a> {
 
     /// A clickable label. Hover brightens it; `active` bolds it in its own color.
     /// Returns the x after the label.
-    pub fn button(&mut self, action: Action, x: i32, y: i32, label: &str, b: Btn) -> i32 {
-        let w = label.chars().count() as i32;
+    pub fn button(&mut self, action: Action, x: i32, y: i32, label: &str, btn: Btn) -> i32 {
+        let width = units(label.chars().count());
         let bg_on_hover = self.pal.tb_hover_bg;
         let mut bg = self.pal.tb_bg;
-        let mut fg = b.fg.unwrap_or(self.pal.tb_label);
+        let mut fg = btn.fg.unwrap_or(self.pal.tb_label);
         let mut modifier = Modifier::empty();
-        let hovered = !b.disabled && self.is_hover(x, y, w, 1);
-        if b.disabled {
+        let hovered = !btn.disabled && self.is_hover(x, y, width, 1);
+        if btn.disabled {
             fg = self.pal.disabled;
-        } else if b.active {
-            fg = b.active_color.unwrap_or(self.pal.text);
+        } else if let Some(active) = btn.active_color {
+            fg = active;
             modifier = Modifier::BOLD;
         }
         if hovered {
-            fg = match b.fg {
-                Some(c) if !b.active => c,
+            fg = match btn.fg {
+                Some(c) if btn.active_color.is_none() => c,
                 _ => self.pal.tb_hover,
             };
             bg = bg_on_hover;
         }
-        let end = self.text_clipped(x, y, label, fg, bg, modifier, self.width);
-        if !b.disabled {
-            self.hotspots.push(Hotspot {
+        let style = Style::new().fg(fg).bg(bg).add_modifier(modifier);
+        let end = self.text_clipped(x, y, label, style, self.width);
+        if !btn.disabled {
+            self.hotspot(
                 action,
-                x,
-                y,
-                w,
-                h: 1,
-            });
+                Rect {
+                    x,
+                    y,
+                    w: width,
+                    h: 1,
+                },
+            );
         }
         end
     }

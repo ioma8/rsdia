@@ -16,6 +16,10 @@ on — credit for both ideas goes there.
 cargo install --path .      # or: cargo build --release
 ```
 
+Tagged releases carry prebuilt binaries for macOS (arm64, x86_64), Linux
+(arm64, x86_64) and Windows (arm64, x86_64). Pushing a `v*` tag runs the gates,
+builds every platform and opens a draft release with the binaries attached.
+
 ## Use
 
 ```sh
@@ -50,7 +54,9 @@ use the bare digits instead of `Alt`+digit.
 ## Develop
 
 ```sh
-cargo test    # golden fixtures from ASCIIFlow, its own spec files, end-to-end app tests
+cargo test              # golden fixtures from ASCIIFlow, its own spec files, end-to-end app tests
+cargo clippy --all-targets  # strict: pedantic + nursery are denied, see Cargo.toml
+cargo fmt
 ```
 
 `src/core` is pure (no terminal, no I/O), `src/tui` is the ratatui front end,

@@ -1,6 +1,6 @@
 //! Export formatting.
 //!
-//! Wrapper semantics ported from ASCIIFlow (`client/export.tsx`), MIT © Lewis Hemens.
+//! Wrapper semantics ported from `ASCIIFlow` (`client/export.tsx`), MIT © Lewis Hemens.
 
 use super::glyphs::to_basic;
 use super::layer::Layer;
@@ -46,10 +46,12 @@ fn wrapper_info(w: Wrapper) -> (Wrapper, &'static str, &'static str) {
         .expect("every wrapper is listed")
 }
 
+#[must_use]
 pub fn wrapper_id(w: Wrapper) -> &'static str {
     wrapper_info(w).1
 }
 
+#[must_use]
 pub fn is_wrapper(value: &str) -> Option<Wrapper> {
     WRAPPERS
         .iter()
@@ -57,8 +59,9 @@ pub fn is_wrapper(value: &str) -> Option<Wrapper> {
         .map(|(w, _, _)| *w)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Charset {
+    #[default]
     Extended,
     Basic,
 }
@@ -81,13 +84,14 @@ pub fn to_basic_text(text: &str) -> String {
     text.chars().map(to_basic).collect()
 }
 
+#[must_use]
 pub fn apply_export_config(text: &str, config: &ExportConfig) -> String {
     let text = if config.characters == Charset::Basic {
         to_basic_text(text)
     } else {
         text.to_string()
     };
-    let mut lines: Vec<String> = text.split('\n').map(|l| l.to_string()).collect();
+    let mut lines: Vec<String> = text.split('\n').map(ToString::to_string).collect();
     let prefix = |lines: &mut Vec<String>, p: &str| {
         for line in lines.iter_mut() {
             line.insert_str(0, p);
@@ -136,6 +140,7 @@ pub fn apply_export_config(text: &str, config: &ExportConfig) -> String {
 }
 
 /// Drawing text: bounding box of all non-empty cells, trailing spaces trimmed per row.
+#[must_use]
 pub fn export_text(layer: &Layer, config: &ExportConfig) -> String {
     apply_export_config(&layer_to_text(layer, None, true), config)
 }

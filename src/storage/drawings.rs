@@ -1,5 +1,6 @@
 //! Drawing files: `${XDG_DATA_HOME:-~/.local/share}/rsdia/drawings/<slug>.rd.json`
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -10,6 +11,7 @@ use crate::core::vector::Pos;
 
 pub const FILE_EXT: &str = ".rd.json";
 
+#[must_use]
 pub fn xdg_dir(var: &str, fallback: &[&str]) -> PathBuf {
     if let Ok(dir) = std::env::var(var) {
         if !dir.is_empty() {
@@ -23,10 +25,12 @@ pub fn xdg_dir(var: &str, fallback: &[&str]) -> PathBuf {
     path
 }
 
+#[must_use]
 pub fn data_dir() -> PathBuf {
     xdg_dir("XDG_DATA_HOME", &[".local", "share"]).join("rsdia")
 }
 
+#[must_use]
 pub fn drawings_dir() -> PathBuf {
     data_dir().join("drawings")
 }
@@ -40,6 +44,7 @@ pub struct DrawingInfo {
 }
 
 /// `Café Plan / v2` -> `cafe-plan-v2`; anything without alphanumerics -> `untitled`.
+#[must_use]
 pub fn slugify(name: &str) -> String {
     let decomposed: String = name.nfkd().collect();
     let lowered = decomposed.to_lowercase();
@@ -63,6 +68,7 @@ pub fn slugify(name: &str) -> String {
     }
 }
 
+#[must_use]
 pub fn path_for_name(name: &str, dir: &Path) -> PathBuf {
     dir.join(format!("{}{FILE_EXT}", slugify(name)))
 }
@@ -80,7 +86,9 @@ pub(crate) fn json_escape(value: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\u{c}' => out.push_str("\\f"),
             '\r' => out.push_str("\\r"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if (c as u32) < 0x20 => {
+                write!(out, "\\u{:04x}", c as u32).expect("writing to a String cannot fail");
+            }
             c => out.push(c),
         }
     }
@@ -89,6 +97,7 @@ pub(crate) fn json_escape(value: &str) -> String {
 }
 
 /// Cells sorted row-major so saves are deterministic.
+#[must_use]
 pub fn serialize(name: &str, layer: &Layer) -> String {
     let mut cells: Vec<(Pos, char)> = layer
         .entries()
@@ -117,10 +126,17 @@ pub fn serialize(name: &str, layer: &Layer) -> String {
 
 /// Returns the drawing's name and cells. `createdAt`/`updatedAt` in files written
 /// by older versions are ignored.
+///
+/// # Errors
+///
+/// If the JSON is malformed or the version is not one this build understands.
 pub fn deserialize(text: &str) -> Result<(String, Layer), String> {
     let value: serde_json::Value =
         serde_json::from_str(text).map_err(|e| format!("Unsupported drawing file: {e}"))?;
-    let version = value.get("version").and_then(|v| v.as_i64()).unwrap_or(0);
+    let version = value
+        .get("version")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
     let cells = value.get("cells").and_then(|v| v.as_array());
     let (Some(cells), 1) = (cells, version) else {
         return Err("Unsupported drawing file".to_string());
@@ -136,14 +152,17 @@ pub fn deserialize(text: &str) -> Result<(String, Layer), String> {
             continue;
         };
         let (Some(x), Some(y), Some(v)) = (
-            items.first().and_then(|v| v.as_i64()),
-            items.get(1).and_then(|v| v.as_i64()),
+            items.first().and_then(serde_json::Value::as_i64),
+            items.get(1).and_then(serde_json::Value::as_i64),
             items.get(2).and_then(|v| v.as_str()),
         ) else {
             continue;
         };
         let Some(ch) = v.chars().next() else { continue };
-        layer.set(Pos::new(x as i32, y as i32), ch);
+        let (Ok(x), Ok(y)) = (i32::try_from(x), i32::try_from(y)) else {
+            return Err("Coordinate out of range".to_string());
+        };
+        layer.set(Pos::new(x, y), ch);
     }
     Ok((name, layer))
 }
@@ -161,7 +180,8 @@ impl Default for DrawingStore {
 }
 
 impl DrawingStore {
-    pub fn new(dir: PathBuf) -> Self {
+    #[must_use]
+    pub const fn new(dir: PathBuf) -> Self {
         Self { dir }
     }
 
@@ -169,6 +189,7 @@ impl DrawingStore {
         let _ = fs::create_dir_all(&self.dir);
     }
 
+    #[must_use]
     pub fn list(&self) -> Vec<DrawingInfo> {
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return Vec::new();
@@ -194,12 +215,14 @@ impl DrawingStore {
         out
     }
 
+    #[must_use]
     pub fn exists(&self, name: &str) -> bool {
         let slug = slugify(name);
         self.list().iter().any(|d| slugify(&d.name) == slug)
     }
 
     /// "untitled", "untitled 2", ... — first name not taken.
+    #[must_use]
     pub fn unique_name(&self, base: &str) -> String {
         if !self.exists(base) {
             return base.to_string();
@@ -214,16 +237,26 @@ impl DrawingStore {
         }
     }
 
+    #[must_use]
     pub fn path_for(&self, name: &str) -> PathBuf {
         path_for_name(name, &self.dir)
     }
 
+    /// Reads a drawing file.
+    ///
+    /// # Errors
+    ///
+    /// If the file cannot be read or does not parse.
     pub fn load(&self, path: &Path) -> Result<(String, Layer), String> {
         let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
         deserialize(&text)
     }
 
-    /// Atomic write: temp file + rename.
+    /// Writes the drawing atomically: temp file, then rename.
+    ///
+    /// # Errors
+    ///
+    /// If the directory cannot be created or the file cannot be written.
     pub fn save(&self, path: &Path, name: &str, layer: &Layer) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
@@ -239,6 +272,11 @@ impl DrawingStore {
         Ok(())
     }
 
+    /// Saves the drawing under a new name and removes the old file.
+    ///
+    /// # Errors
+    ///
+    /// If the new name cannot be saved under.
     pub fn rename(
         &self,
         old_path: &Path,
@@ -257,6 +295,11 @@ impl DrawingStore {
         let _ = fs::remove_file(path);
     }
 
+    /// Creates an empty drawing under a name that is free.
+    ///
+    /// # Errors
+    ///
+    /// If the drawing directory cannot be created or the empty file cannot be written.
     pub fn create(&self, name: &str) -> Result<PathBuf, String> {
         self.ensure_dir();
         let path = self.path_for(name);
@@ -269,6 +312,12 @@ impl DrawingStore {
 mod tests {
     use super::*;
     use crate::core::text::text_to_layer;
+
+    #[test]
+    fn a_coordinate_that_does_not_fit_is_rejected() {
+        let text = r#"{"version":1,"name":"x","cells":[[99999999999,0,"a"]]}"#;
+        assert!(deserialize(text).is_err());
+    }
 
     #[test]
     fn slugify_matches_asciiflow_names() {

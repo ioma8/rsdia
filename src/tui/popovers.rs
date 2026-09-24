@@ -5,10 +5,11 @@ use ratatui::style::{Color, Modifier};
 
 use crate::core::editor::ToolId;
 use crate::core::export::{Charset, WRAPPERS};
+use crate::core::vector::{index, px, units, wide};
 use crate::storage::config::GRID_STYLES;
 use crate::tui::host::{Dialog, Host};
 use crate::tui::painter::{from_area, to_area, Action, Btn, ItemId, Painter, PanelId, Rect};
-use crate::tui::theme::{Palette, ThemeName, THEME_CHOICES};
+use crate::tui::theme::THEME_CHOICES;
 use crate::tui::toolbar::tool_color;
 use ratatui::layout::Constraint;
 use ratatui::style::Style;
@@ -20,6 +21,7 @@ use ratatui::widgets::{Cell, ListItem, Row, Table, Widget};
 /// Places a dropdown or panel under its anchor, clamped inside `area` — the strip
 /// between the menu bar and the floating tool picker. Panels therefore never
 /// overlap the picker, whatever their contents.
+#[must_use]
 pub fn place_popover(anchor_x: i32, area: Rect, w: i32, h: i32) -> Rect {
     let want = Rect {
         x: (anchor_x - 2).max(area.x),
@@ -51,82 +53,81 @@ pub fn rule(p: &mut Painter, r: Rect, y: i32) {
 pub struct FlowButton {
     pub action: Action,
     pub label: String,
-    pub active: bool,
-    pub fg: Option<Color>,
+    /// The same style a standalone button takes, so there is one way to colour one.
+    pub btn: Btn,
 }
 
 impl FlowButton {
+    #[must_use]
     pub fn new(action: Action, label: impl Into<String>) -> Self {
         Self {
             action,
             label: label.into(),
-            active: false,
-            fg: None,
+            btn: Btn::default(),
         }
     }
 
-    pub fn active(mut self, yes: bool) -> Self {
-        self.active = yes;
+    /// `yes` marks the current choice, which is drawn bold in `accent`.
+    #[must_use]
+    pub const fn active(mut self, yes: bool, accent: Color) -> Self {
+        self.btn.active_color = if yes { Some(accent) } else { None };
         self
     }
 
-    pub fn fg(mut self, c: Color) -> Self {
-        self.fg = Some(c);
+    #[must_use]
+    pub const fn fg(mut self, c: Color) -> Self {
+        self.btn.fg = Some(c);
         self
+    }
+}
+
+/// Where a flow's next button goes: past the right edge means the next row.
+/// Both the drawing pass and the height pass that sized the panel use this one rule.
+const fn wrap(x: &mut i32, y: &mut i32, len: i32, right: i32, indent: i32) {
+    if *x + len > right && *x > indent {
+        *y += 1;
+        *x = indent;
     }
 }
 
 /// Lays out buttons left to right, wrapping inside `r`. Returns the next free row.
 pub fn flow(p: &mut Painter, r: Rect, mut y: i32, buttons: &[FlowButton], lead: &str) -> i32 {
     let pal = p.pal;
-    let left = r.x + 2;
     let right = r.x + r.w - 2;
-    let mut x = left;
+    let mut x = r.x + 2;
     if !lead.is_empty() {
         x = p.text(x, y, lead, pal.muted, pal.tb_bg);
     }
     let indent = x;
     for b in buttons {
-        let len = b.label.chars().count() as i32;
-        if x + len > right && x > indent {
-            y += 1;
-            x = indent;
-        }
-        let style = Btn {
-            active: b.active,
-            active_color: Some(pal.accent),
-            fg: b.fg,
-            ..Default::default()
-        };
-        x = p.button(b.action, x, y, &b.label, style) + 2;
+        let len = units(b.label.chars().count());
+        wrap(&mut x, &mut y, len, right, indent);
+        x = p.button(b.action, x, y, &b.label, b.btn) + 2;
     }
     y + 1
 }
 
-/// Height needed by [`flow`] for the same inputs.
-pub fn flow_height(width: i32, labels: &[&str], lead: &str) -> i32 {
-    let inner = width - 4 - lead.chars().count() as i32;
-    let mut rows = 1;
-    let mut x = 0;
-    for l in labels {
-        let len = l.chars().count() as i32;
-        if x + len > inner && x > 0 {
-            rows += 1;
-            x = 0;
-        }
+/// Height needed by [`flow`] for the same buttons.
+#[must_use]
+pub fn flow_height(width: i32, buttons: &[FlowButton], lead: &str) -> i32 {
+    let right = width - 4 - units(lead.chars().count());
+    let (mut x, mut y) = (0, 0);
+    for b in buttons {
+        let len = units(b.label.chars().count());
+        wrap(&mut x, &mut y, len, right, 0);
         x += len + 2;
     }
-    rows
+    y + 1
 }
 
 fn truncate_end(name: &str, width: i32) -> String {
-    let count = name.chars().count() as i32;
+    let count = units(name.chars().count());
     if width <= 0 {
         String::new()
     } else if count <= width {
         name.to_string()
     } else {
-        let mut out: String = name.chars().take((width - 1).max(0) as usize).collect();
+        let mut out: String = name.chars().take(index(width - 1)).collect();
         out.push('…');
         out
     }
@@ -147,12 +148,11 @@ pub fn render_files(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect)
         FlowButton::new(Action::FilesClear, "[clear]").fg(pal.warning),
         FlowButton::new(Action::FilesDelete, "[delete]").fg(pal.danger),
     ];
-    let labels: Vec<&str> = actions.iter().map(|a| a.label.as_str()).collect();
-    let actions_rows = flow_height(FILES_WIDTH, &labels, "");
+    let actions_rows = flow_height(FILES_WIDTH, &actions, "");
     let all = host.drawings();
     // Two borders + the list + the rule + the button rows must fit the strip exactly.
     let room = (area.h - 3 - actions_rows).max(1);
-    let list_rows = (all.len() as i32).clamp(1, room);
+    let list_rows = units(all.len().clamp(1, index(room)));
     let selected = host.list_selection().filter(|i| *i < all.len());
     let footer = format!("{}/{}", selected.map_or(0, |i| i + 1), all.len());
     let h = 2 + list_rows + 1 + actions_rows;
@@ -179,33 +179,29 @@ pub fn render_files(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect)
             .map(|d| d.size.to_string().len())
             .max()
             .unwrap_or(1);
-        let name_w = (list.w - size_w as i32 - 8).max(4);
+        let name_w = (list.w - units(size_w) - 8).max(4);
 
-        let current = host.current_path().to_path_buf();
         let items: Vec<ListItem> = all
             .iter()
             .map(|d| {
+                let current = d.path == host.current_path();
                 let label = format!(
                     "{} {:<width$} {:>size_w$} cells",
-                    if d.path == current { ">" } else { " " },
+                    if current { ">" } else { " " },
                     truncate_end(&d.name, name_w),
                     d.size,
-                    width = name_w as usize
+                    width = index(name_w)
                 );
-                let fg = if d.path == current {
-                    pal.accent
-                } else {
-                    pal.text
-                };
+                let fg = if current { pal.accent } else { pal.text };
                 ListItem::new(Line::from(label).style(Style::new().fg(fg)))
             })
             .collect();
         p.list(list, items, selected);
         // A click anywhere on the row opens that drawing.
-        for i in 0..all.len().min(list_rows as usize) {
+        for i in 0..all.len().min(index(list_rows)) {
             let row = Rect {
                 x: list.x,
-                y: list.y + i as i32,
+                y: list.y + units(i),
                 w: list.w,
                 h: 1,
             };
@@ -227,77 +223,81 @@ pub fn render_export(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect
     let preview: Vec<String> = host
         .export_preview()
         .split('\n')
-        .map(|l| l.to_string())
+        .map(ToString::to_string)
         .collect();
-    let preview_width = preview.iter().map(|l| l.chars().count()).max().unwrap_or(0) as i32;
-    let w = p.width.min(64.max(preview_width + 4));
-    let wrap_labels: Vec<&str> = WRAPPERS.iter().map(|(_, _, label)| *label).collect();
-    let wrap_rows = flow_height(w, &wrap_labels, "wrap:       ");
-    let chrome = wrap_rows + 6;
+    let preview_width = units(preview.iter().map(|l| l.chars().count()).max().unwrap_or(0));
+    let width = p.width.min(64.max(preview_width + 4));
+    let wrappers: Vec<FlowButton> = WRAPPERS
+        .iter()
+        .map(|(id, _, label)| {
+            FlowButton::new(Action::ExportWrapper(*id), *label)
+                .active(cfg.wrapper == *id, pal.accent)
+        })
+        .collect();
+    let chrome = flow_height(width, &wrappers, "wrap:       ") + 6;
     let preview_rows = (area.h - chrome).max(1);
     let top = host.preview_top().min(preview.len().saturating_sub(1));
-    let h = chrome + preview_rows;
-    let r = place_popover(anchor_x, area, w, h);
+    let height = chrome + preview_rows;
+    let panel = place_popover(anchor_x, area, width, height);
     let footer = format!("{}/{} lines", (top + 1).min(preview.len()), preview.len());
-    let inner = p.titled_panel(r, pal.tb_border, pal.tb_bg, Some("Export"), Some(&footer));
+    let inner = p.titled_panel(
+        panel,
+        pal.tb_border,
+        pal.tb_bg,
+        Some("Export"),
+        Some(&footer),
+    );
 
     let charset = [
         FlowButton::new(Action::ExportCharset(Charset::Extended), "extended")
-            .active(cfg.characters == Charset::Extended),
+            .active(cfg.characters == Charset::Extended, pal.accent),
         FlowButton::new(Action::ExportCharset(Charset::Basic), "basic")
-            .active(cfg.characters == Charset::Basic),
+            .active(cfg.characters == Charset::Basic, pal.accent),
         FlowButton::new(
             Action::ExportFence,
             if cfg.fenced {
-                "[x] markdown fence"
+                "[at] markdown fence"
             } else {
                 "[ ] markdown fence"
             },
         )
-        .active(cfg.fenced),
+        .active(cfg.fenced, pal.accent),
     ];
-    let wrappers: Vec<FlowButton> = WRAPPERS
-        .iter()
-        .map(|(id, _, label)| {
-            FlowButton::new(Action::ExportWrapper(*id), *label).active(cfg.wrapper == *id)
-        })
-        .collect();
-
-    let mut y = inner.y;
-    y = flow(p, r, y, &charset, "characters: ");
-    y = flow(p, r, y, &wrappers, "wrap:       ");
-    rule(p, r, y);
-    y += 1;
-    let lines: Vec<Line> = preview
+    let mut row = inner.y;
+    row = flow(p, panel, row, &charset, "characters: ");
+    row = flow(p, panel, row, &wrappers, "wrap:       ");
+    rule(p, panel, row);
+    row += 1;
+    let lines: Vec<ListItem> = preview
         .iter()
         .skip(top)
-        .take(preview_rows as usize)
-        .map(|l| Line::from(format!(" {l}")).style(Style::new().fg(pal.fg)))
+        .take(index(preview_rows))
+        .map(|line| ListItem::new(Line::from(format!(" {line}")).style(Style::new().fg(pal.fg))))
         .collect();
     p.list(
         Rect {
             x: inner.x,
-            y,
+            y: row,
             w: inner.w,
             h: preview_rows,
         },
-        lines.into_iter().map(ListItem::new).collect(),
+        lines,
         None,
     );
-    y += preview_rows;
-    rule(p, r, y);
-    y += 1;
-    let x = p.button(
+    row += preview_rows;
+    rule(p, panel, row);
+    row += 1;
+    let at = p.button(
         Action::ExportCopy,
         inner.x + 1,
-        y,
+        row,
         "[copy to clipboard]",
         Btn::default().fg(pal.success),
     ) + 2;
     p.button(
         Action::ExportSave,
-        x,
-        y,
+        at,
+        row,
         "[save…]",
         Btn::default().fg(pal.accent),
     );
@@ -307,33 +307,34 @@ pub fn render_export(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect
 
 const SETTINGS_WIDTH: i32 = 58;
 
-fn settings_height() -> i32 {
-    let themes: Vec<&str> = THEME_CHOICES.iter().map(|t| t.name()).collect();
-    2 + 1 + flow_height(SETTINGS_WIDTH, &themes, "theme: ") + 1 + 1
-}
-
 /// `settings` popover: grid style, theme, copy-on-select, recenter.
 pub fn render_settings(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect) {
-    let r = place_popover(anchor_x, area, SETTINGS_WIDTH, settings_height());
     let pal = p.pal;
-    p.titled_panel(r, pal.tb_border, pal.tb_bg, Some("Settings"), None);
-    let cfg = host.config().clone();
-    let mut y = r.y + 1;
+    let cfg = host.config();
     let grids: Vec<FlowButton> = GRID_STYLES
         .iter()
-        .map(|g| FlowButton::new(Action::SettingsGrid(*g), g.name()).active(cfg.grid == *g))
+        .map(|g| {
+            FlowButton::new(Action::SettingsGrid(*g), g.name()).active(cfg.grid == *g, pal.accent)
+        })
         .collect();
-    y = flow(p, r, y, &grids, "grid:  ");
     let themes: Vec<FlowButton> = THEME_CHOICES
         .iter()
-        .map(|t| FlowButton::new(Action::SettingsTheme(*t), t.name()).active(cfg.theme == *t))
+        .map(|t| {
+            FlowButton::new(Action::SettingsTheme(*t), t.name()).active(cfg.theme == *t, pal.accent)
+        })
         .collect();
+    // The panel is as tall as the rows its own buttons need.
+    let h = 2 + 1 + flow_height(SETTINGS_WIDTH, &themes, "theme: ") + 1 + 1;
+    let r = place_popover(anchor_x, area, SETTINGS_WIDTH, h);
+    p.titled_panel(r, pal.tb_border, pal.tb_bg, Some("Settings"), None);
+    let mut y = r.y + 1;
+    y = flow(p, r, y, &grids, "grid:  ");
     y = flow(p, r, y, &themes, "theme: ");
     let copy = [FlowButton::new(
         Action::SettingsCopyOnSelect,
         if cfg.copy_on_select { "on" } else { "off" },
     )
-    .active(cfg.copy_on_select)];
+    .active(cfg.copy_on_select, pal.accent)];
     y = flow(p, r, y, &copy, "copy on select: ");
     p.button(
         Action::SettingsRecenter,
@@ -346,23 +347,19 @@ pub fn render_settings(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Re
 
 // ------------------------------------------------------------------ help
 
-pub const TOOL_HELP: [(ToolId, &str); 6] = [
-    (ToolId::Box, "drag corner to corner"),
-    (
-        ToolId::Select,
-        "drag to move boxes, words and selections; drag a line to resize, a line end to reshape",
-    ),
-    (
-        ToolId::Arrow,
-        "drag start to end. press f to flip the elbow",
-    ),
-    (ToolId::Line, "drag start to end. press f to flip the elbow"),
-    (
-        ToolId::Text,
-        "click and type. enter: new line, esc: finish, arrows move",
-    ),
-    (ToolId::Eraser, "drag to erase"),
-];
+/// What the active tool does, in one line.
+#[must_use]
+pub const fn tool_help(tool: ToolId) -> &'static str {
+    match tool {
+        ToolId::Box => "drag corner to corner",
+        ToolId::Select => {
+            "drag to move boxes, words and selections; drag a line to resize, a line end to reshape"
+        }
+        ToolId::Arrow | ToolId::Line => "drag start to end. press f to flip the elbow",
+        ToolId::Text => "click and type. enter: new line, esc: finish, arrows move",
+        ToolId::Eraser => "drag to erase",
+    }
+}
 
 const SHORTCUTS: [(&str, &str); 14] = [
     (
@@ -400,15 +397,11 @@ const SHORTCUTS: [(&str, &str); 14] = [
 pub fn render_help(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect) {
     let pal = p.pal;
     let w = area.w.min(76);
-    let h = 2 + 1 + 1 + SHORTCUTS.len() as i32 + 1;
+    let h = 2 + 1 + 1 + units(SHORTCUTS.len()) + 1;
     let r = place_popover(anchor_x, area, w, h);
     let inner = p.titled_panel(r, pal.tb_border, pal.tb_bg, Some("Help"), None);
     let tool = host.editor().tool();
-    let help = TOOL_HELP
-        .iter()
-        .find(|(t, _)| *t == tool)
-        .map(|(_, h)| *h)
-        .unwrap_or("");
+    let help = tool_help(tool);
     p.paragraph(
         Rect {
             x: inner.x,
@@ -442,12 +435,9 @@ pub fn render_help(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect) 
         .map(|(k, _)| k.chars().count())
         .max()
         .unwrap_or(0);
-    let table = Table::new(
-        rows,
-        [Constraint::Length(key_w as u16), Constraint::Min(20)],
-    )
-    .column_spacing(2)
-    .style(Style::new().bg(pal.tb_bg));
+    let table = Table::new(rows, [Constraint::Length(wide(key_w)), Constraint::Min(20)])
+        .column_spacing(2)
+        .style(Style::new().bg(pal.tb_bg));
     let table_area = Rect {
         x: inner.x,
         y: rule_y + 1,
@@ -479,7 +469,8 @@ const HELP_MENU: [(ItemId, &str, &str); 1] = [(ItemId::Help, "Keyboard shortcuts
 
 /// The entries of a menu-bar dropdown, in display order. Keyboard navigation and
 /// the renderer read the same list, so they cannot drift apart.
-pub fn menu_entries(panel: PanelId) -> &'static [(ItemId, &'static str, &'static str)] {
+#[must_use]
+pub const fn menu_entries(panel: PanelId) -> &'static [(ItemId, &'static str, &'static str)] {
     match panel {
         PanelId::FileMenu => &FILE_MENU,
         PanelId::EditMenu => &EDIT_MENU,
@@ -534,12 +525,12 @@ fn render_dropdown(
         .map(|(_, _, key)| key.len())
         .max()
         .unwrap_or(0);
-    let width = (label_w + key_w + 5) as i32;
-    let r = place_popover(anchor_x, area, width, entries.len() as i32 + 2);
+    let width = units(label_w + key_w + 5);
+    let r = place_popover(anchor_x, area, width, units(entries.len()) + 2);
     let inner = p.titled_panel(r, pal.tb_border, pal.tb_bg, None, None);
     // A narrow terminal clamps the panel, so the label gives way first: it is
     // shortened with an ellipsis and the accelerator column is kept whole.
-    let room = (inner.w - key_w as i32 - 3).max(1) as usize;
+    let room = index(inner.w - units(key_w) - 3).max(1);
     let cursor = Some(host.menu_index()).filter(|i| {
         entries
             .get(*i)
@@ -557,11 +548,11 @@ fn render_dropdown(
             };
             let text: String = format!(
                 " {:<room$} {:>key_w$} ",
-                truncate_end(label, room as i32),
+                truncate_end(label, units(room)),
                 key
             )
             .chars()
-            .take(inner.w.max(0) as usize)
+            .take(index(inner.w.max(0)))
             .collect();
             let mut style = Style::new().fg(if menu_entry_disabled(host, *id) {
                 pal.disabled
@@ -570,7 +561,7 @@ fn render_dropdown(
             });
             let row = Rect {
                 x: inner.x,
-                y: inner.y + i as i32,
+                y: inner.y + units(i),
                 w: inner.w,
                 h: 1,
             };
@@ -584,7 +575,7 @@ fn render_dropdown(
     for (i, (id, _, _)) in entries.iter().enumerate() {
         let row = Rect {
             x: inner.x,
-            y: inner.y + i as i32,
+            y: inner.y + units(i),
             w: inner.w,
             h: 1,
         };
@@ -597,12 +588,12 @@ fn render_dropdown(
 // ------------------------------------------------------------------ dialog
 
 /// Modal input and confirm dialogs, centered on screen.
-pub fn render_dialog(p: &mut Painter, d: &Dialog) {
+pub fn render_dialog(p: &mut Painter, dialog: &Dialog) {
     let pal = p.pal;
-    let w = p.width.min(56);
-    let h = if d.input().is_some() { 7 } else { 6 };
+    let width = p.width.min(56);
+    let height = if dialog.input().is_some() { 7 } else { 6 };
     // A modal sits dead centre, whatever the screen size.
-    let r = from_area(
+    let panel = from_area(
         to_area(Rect {
             x: 0,
             y: 0,
@@ -610,23 +601,23 @@ pub fn render_dialog(p: &mut Painter, d: &Dialog) {
             h: p.height,
         })
         .centered(
-            Constraint::Length(w.max(1) as u16),
-            Constraint::Length(h.max(1) as u16),
+            Constraint::Length(px(width.max(1))),
+            Constraint::Length(px(height.max(1))),
         ),
     );
     // The block's title carries the prompt, so the body starts on the second row.
-    p.titled_panel(r, pal.accent, pal.tb_bg, Some(d.title()), None);
-    match d {
+    p.titled_panel(panel, pal.accent, pal.tb_bg, Some(dialog.title()), None);
+    match dialog {
         Dialog::Input(input) => {
-            let y = r.y + 2;
+            let row = panel.y + 2;
             let label = format!("{}: ", input.label);
-            let label_end = p.text(r.x + 2, y, &label, pal.muted, pal.tb_bg);
-            let field_w = r.x + r.w - 2 - label_end;
+            let label_end = p.text(panel.x + 2, row, &label, pal.muted, pal.tb_bg);
+            let field_w = panel.x + panel.w - 2 - label_end;
             // Scroll the field so the cursor stays visible.
-            let start = 0.max(input.cursor as i32 - field_w + 1) as usize;
+            let start = index(0.max(units(input.cursor) - field_w + 1));
             let chars: Vec<char> = input.value.chars().collect();
             for i in 0..field_w {
-                let index = start + i as usize;
+                let index = start + index(i);
                 let ch = chars.get(index).copied().unwrap_or(' ');
                 let modifier = if index == input.cursor {
                     Modifier::REVERSED
@@ -635,7 +626,7 @@ pub fn render_dialog(p: &mut Painter, d: &Dialog) {
                 };
                 p.cell(
                     label_end + i,
-                    y,
+                    row,
                     &ch.to_string(),
                     pal.text,
                     pal.selection_bg,
@@ -643,45 +634,33 @@ pub fn render_dialog(p: &mut Painter, d: &Dialog) {
                 );
             }
             if let Some(error) = &input.error {
-                p.text_clipped(
-                    r.x + 2,
-                    y + 1,
-                    error,
-                    pal.danger,
-                    pal.tb_bg,
-                    Modifier::empty(),
-                    r.x + r.w - 2,
-                );
+                let style = Style::new().fg(pal.danger).bg(pal.tb_bg);
+                p.text_clipped(panel.x + 2, row + 1, error, style, panel.x + panel.w - 2);
             }
         }
         Dialog::Confirm(confirm) => {
+            let style = Style::new().fg(pal.text).bg(pal.tb_bg);
             p.text_clipped(
-                r.x + 2,
-                r.y + 2,
+                panel.x + 2,
+                panel.y + 2,
                 &confirm.message,
-                pal.text,
-                pal.tb_bg,
-                Modifier::empty(),
-                r.x + r.w - 2,
+                style,
+                panel.x + panel.w - 2,
             );
         }
     }
-    let y = r.y + r.h - 2;
-    let ok = match d {
+    let row = panel.y + panel.h - 2;
+    let ok = match dialog {
         Dialog::Input(_) => "[ok]".to_string(),
-        Dialog::Confirm(c) => format!("[{}]", c.yes),
+        Dialog::Confirm(yes) => format!("[{}]", yes.yes),
     };
-    let mut x = r.x + r.w - 4 - ok.chars().count() as i32 - "[cancel]".chars().count() as i32;
-    let ok_fg = if matches!(d, Dialog::Confirm(_)) {
+    let mut at =
+        panel.x + panel.w - 4 - units(ok.chars().count()) - units("[cancel]".chars().count());
+    let ok_fg = if matches!(dialog, Dialog::Confirm(_)) {
         pal.danger
     } else {
         pal.success
     };
-    x = p.button(Action::DialogOk, x, y, &ok, Btn::default().fg(ok_fg)) + 2;
-    p.button(Action::DialogCancel, x, y, "[cancel]", Btn::default());
-}
-
-/// Reads a palette for a theme name; free function so tests can build one without an app.
-pub fn palette_for(theme: ThemeName, term: Option<&crate::tui::theme::TerminalColors>) -> Palette {
-    crate::tui::theme::palette(theme, term)
+    at = p.button(Action::DialogOk, at, row, &ok, Btn::default().fg(ok_fg)) + 2;
+    p.button(Action::DialogCancel, at, row, "[cancel]", Btn::default());
 }

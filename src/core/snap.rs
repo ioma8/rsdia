@@ -1,37 +1,32 @@
 //! Merges freshly drawn structure with committed structure: forms tees and
 //! crosses, detaches from deleted cells, and normalises leftover junctions.
 //!
-//! Ported from ASCIIFlow (`client/snap.ts`), MIT © Lewis Hemens.
+//! Ported from `ASCIIFlow` (`client/snap.ts`), MIT © Lewis Hemens.
 
 use super::glyphs::{
     connect, connectable, connection_glyph, connects, disconnect, is_arrow, is_box_drawing,
 };
 use std::collections::{BTreeSet, HashSet};
+use std::hash::BuildHasher;
 
 use super::layer::{is_erase, Layer};
 use super::vector::{Direction, Pos};
 
-/// Returns a layer of extra edits to apply on top of `scratch`.
-/// `protect` holds cells that must not be normalised (content being moved).
-pub fn snap(scratch: &Layer, committed: &Layer, protect: &HashSet<Pos>) -> Layer {
-    let mut layer = Layer::new();
-
-    // Cells already written this pass, or held by scratch: both beat committed.
-    let state_at = |layer: &Layer, p: Pos| -> Option<char> {
-        if let Some(v) = layer.get(p) {
-            return if is_erase(v) { None } else { Some(v) };
-        }
-        if let Some(v) = scratch.get(p) {
-            return if is_erase(v) { None } else { Some(v) };
-        }
-        committed.get(p)
-    };
-
-    for position in scratch.positions().collect::<Vec<_>>() {
+/// Walks every scratch cell whose own glyph `keep` accepts, and for each of its
+/// four neighbours that is committed (never scratch) and holds a box glyph, calls
+/// `f` with the cell, the neighbour, the direction, and both glyphs. The snap-in and
+/// unsnap passes differ only in `keep` and what `f` does with an edge.
+fn over_edges(
+    scratch: &Layer,
+    committed: &Layer,
+    keep: impl Fn(char) -> bool,
+    mut f: impl FnMut(Pos, Pos, Direction, char, char),
+) {
+    for position in scratch.positions() {
         let Some(value) = scratch.get(position) else {
             continue;
         };
-        if !is_box_drawing(value) {
+        if !keep(value) {
             continue;
         }
         for direction in Direction::ALL {
@@ -46,6 +41,38 @@ pub fn snap(scratch: &Layer, committed: &Layer, protect: &HashSet<Pos>) -> Layer
             if !is_box_drawing(adjacent_value) {
                 continue;
             }
+            f(position, adjacent, direction, value, adjacent_value);
+        }
+    }
+}
+
+/// Returns a layer of extra edits to apply on top of `scratch`.
+/// `protect` holds cells that must not be normalised (content being moved).
+#[must_use]
+pub fn snap<H: BuildHasher>(
+    scratch: &Layer,
+    committed: &Layer,
+    protect: &HashSet<Pos, H>,
+) -> Layer {
+    let mut layer = Layer::new();
+
+    // Cells already written this pass, or held by scratch: both beat committed.
+    let state_at = |layer: &Layer, p: Pos| -> Option<char> {
+        if let Some(v) = layer.get(p) {
+            return if is_erase(v) { None } else { Some(v) };
+        }
+        if let Some(v) = scratch.get(p) {
+            return if is_erase(v) { None } else { Some(v) };
+        }
+        committed.get(p)
+    };
+
+    // Connect each scratch glyph to the committed glyphs it lands beside.
+    over_edges(
+        scratch,
+        committed,
+        is_box_drawing,
+        |position, adjacent, direction, value, adjacent_value| {
             // Connect this cell to the adjacent committed glyph.
             if connects(adjacent_value, direction.opposite())
                 && !connects(value, direction)
@@ -63,38 +90,25 @@ pub fn snap(scratch: &Layer, committed: &Layer, protect: &HashSet<Pos>) -> Layer
             {
                 layer.set(adjacent, connect(current_adjacent, direction.opposite()));
             }
-        }
-    }
+        },
+    );
 
     // Unsnap from deleted cells.
-    for position in scratch.positions().collect::<Vec<_>>() {
-        let Some(value) = scratch.get(position) else {
-            continue;
-        };
-        if !is_erase(value) {
-            continue;
-        }
-        for direction in Direction::ALL {
-            let adjacent = position.add(direction.delta());
-            if scratch.has(adjacent) {
-                continue;
-            }
-            let Some(adjacent_value) = committed.get(adjacent) else {
-                continue;
-            };
-            if !is_box_drawing(adjacent_value) {
-                continue;
-            }
+    over_edges(
+        scratch,
+        committed,
+        is_erase,
+        |_position, adjacent, direction, _value, adjacent_value| {
             let current_adjacent = layer.get(adjacent).unwrap_or(adjacent_value);
             if connects(current_adjacent, direction.opposite()) {
                 layer.set(adjacent, disconnect(current_adjacent, direction.opposite()));
             }
-        }
-    }
+        },
+    );
 
     // Normalise each touched line glyph to the neighbours it actually connects to.
     let mut candidates: BTreeSet<Pos> = BTreeSet::new();
-    for position in scratch.positions().collect::<Vec<_>>() {
+    for position in scratch.positions() {
         for p in std::iter::once(position).chain(Direction::ALL.map(|d| position.add(d.delta()))) {
             if !protect.contains(&p) {
                 candidates.insert(p);
@@ -103,7 +117,7 @@ pub fn snap(scratch: &Layer, committed: &Layer, protect: &HashSet<Pos>) -> Layer
     }
 
     for _pass in 0..2 {
-        for position in candidates.iter().copied().collect::<Vec<_>>() {
+        for position in candidates.iter().copied() {
             let Some(value) = state_at(&layer, position) else {
                 continue;
             };
@@ -112,9 +126,9 @@ pub fn snap(scratch: &Layer, committed: &Layer, protect: &HashSet<Pos>) -> Layer
             }
             let dirs: Vec<Direction> = Direction::ALL
                 .into_iter()
-                .filter(|d| match state_at(&layer, position.add(d.delta())) {
-                    Some(n) => is_box_drawing(n) && connects(n, d.opposite()),
-                    None => false,
+                .filter(|d| {
+                    state_at(&layer, position.add(d.delta()))
+                        .is_some_and(|n| is_box_drawing(n) && connects(n, d.opposite()))
                 })
                 .collect();
             if let Some(glyph) = connection_glyph(&dirs) {

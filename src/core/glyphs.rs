@@ -1,6 +1,6 @@
 //! Box-drawing glyph tables and connection rules.
 //!
-//! Ported from ASCIIFlow (`client/constants.ts`, `client/characters.ts`), MIT © Lewis Hemens.
+//! Ported from `ASCIIFlow` (`client/constants.ts`, `client/characters.ts`), MIT © Lewis Hemens.
 
 use super::vector::Direction;
 
@@ -61,25 +61,22 @@ pub const ASCII: CharacterSet = CharacterSet {
 };
 
 /// Unicode glyph -> "ASCII Basic" glyph, used by export.
-pub fn to_basic(c: char) -> char {
+#[must_use]
+pub const fn to_basic(c: char) -> char {
     match c {
-        '┌' => '+',
-        '┐' => '+',
-        '┘' => '+',
-        '└' => '+',
+        '┌' | '┐' | '┘' | '└' | '┬' | '┴' | '┤' | '├' | '┼' => '+',
         '◄' => '<',
         '►' => '>',
         '▲' => '^',
         '▼' => 'v',
         '│' => '|',
         '─' => '-',
-        '┬' | '┴' | '┤' | '├' | '┼' => '+',
         other => other,
     }
 }
 
 /// Connection mask of every line/junction glyph.
-fn line_mask(c: char) -> Option<u8> {
+const fn line_mask(c: char) -> Option<u8> {
     Some(match c {
         '┌' => D | R,
         '┐' => D | L,
@@ -97,7 +94,7 @@ fn line_mask(c: char) -> Option<u8> {
 }
 
 /// Arrow heads connect only on the side their shaft enters from.
-fn arrow_mask(c: char) -> Option<u8> {
+const fn arrow_mask(c: char) -> Option<u8> {
     Some(match c {
         '◄' => R,
         '►' => L,
@@ -107,7 +104,7 @@ fn arrow_mask(c: char) -> Option<u8> {
     })
 }
 
-fn mask_to_line(m: u8) -> Option<char> {
+const fn mask_to_line(m: u8) -> Option<char> {
     Some(match m {
         m if m == D | R => '┌',
         m if m == D | L => '┐',
@@ -137,28 +134,34 @@ fn mask_of(c: char) -> u8 {
     line_mask(c).or_else(|| arrow_mask(c)).unwrap_or(0)
 }
 
-/// Lines, junctions and arrow heads — ASCIIFlow's `BOX_DRAWING_VALUES`.
-pub fn is_box_drawing(c: char) -> bool {
+/// Lines, junctions and arrow heads — `ASCIIFlow`'s `BOX_DRAWING_VALUES`.
+#[must_use]
+pub const fn is_box_drawing(c: char) -> bool {
     line_mask(c).is_some() || arrow_mask(c).is_some()
 }
 
-pub fn is_arrow(c: char) -> bool {
+#[must_use]
+pub const fn is_arrow(c: char) -> bool {
     arrow_mask(c).is_some()
 }
 
-/// ASCIIFlow's `isSpecial`: any glyph the select tool treats as structure.
-pub fn is_special(c: char) -> bool {
+/// `ASCIIFlow`'s `isSpecial`: any glyph the select tool treats as structure.
+#[must_use]
+pub const fn is_special(c: char) -> bool {
     is_box_drawing(c)
 }
 
+#[must_use]
 pub fn connects(c: char, dir: Direction) -> bool {
     mask_of(c) & dir.bit() != 0
 }
 
+#[must_use]
 pub fn connectable(c: char, dir: Direction) -> bool {
     line_mask(c).is_some() || connects(c, dir)
 }
 
+#[must_use]
 pub fn connections(c: char) -> Vec<Direction> {
     Direction::ALL
         .into_iter()
@@ -167,6 +170,7 @@ pub fn connections(c: char) -> Vec<Direction> {
 }
 
 /// The line glyph connecting exactly `dirs`, or `None` (fewer than two directions).
+#[must_use]
 pub fn connection_glyph(dirs: &[Direction]) -> Option<char> {
     let mut m = 0u8;
     for d in dirs {
@@ -175,46 +179,53 @@ pub fn connection_glyph(dirs: &[Direction]) -> Option<char> {
     mask_to_line(m)
 }
 
-/// Adds a connection to a glyph. Panics for glyphs that cannot take the connection,
-/// matching ASCIIFlow's throw; `connectable` is the guard.
+/// Adds a connection to a glyph; `connectable` is the guard.
+///
+/// # Panics
+///
+/// If `c` cannot take the connection, matching `ASCIIFlow`'s throw.
+#[must_use]
 pub fn connect(c: char, dir: Direction) -> char {
     if connects(c, dir) {
         return c;
     }
-    match line_mask(c) {
-        Some(m) => mask_to_line(m | dir.bit())
-            .unwrap_or_else(|| unreachable!("mask {m} plus {} is a line", dir.bit())),
-        None => panic!("can't connect {c} in direction {dir:?}"),
-    }
+    line_mask(c).map_or_else(
+        || panic!("can't connect {c} in direction {dir:?}"),
+        |m| {
+            mask_to_line(m | dir.bit())
+                .unwrap_or_else(|| unreachable!("mask {m} plus {} is a line", dir.bit()))
+        },
+    )
 }
 
+#[must_use]
 pub fn connect_all(c: char, dirs: &[Direction]) -> char {
     dirs.iter().fold(c, |v, d| connect(v, *d))
 }
 
 /// Removes a connection from a glyph when a clean glyph remains; otherwise keeps it.
+#[must_use]
 pub fn disconnect(c: char, dir: Direction) -> char {
     if !connects(c, dir) {
         return c;
     }
-    match line_mask(c) {
-        Some(m) => {
-            let next = m & !dir.bit();
-            if popcount(next) >= 2 {
-                mask_to_line(next).unwrap_or(c)
-            } else {
-                c
-            }
+    line_mask(c).map_or(c, |m| {
+        let next = m & !dir.bit();
+        if popcount(next) >= 2 {
+            mask_to_line(next).unwrap_or(c)
+        } else {
+            c
         }
-        None => c,
-    }
+    })
 }
 
+#[must_use]
 pub fn disconnect_all(c: char, dirs: &[Direction]) -> char {
     dirs.iter().fold(c, |v, d| disconnect(v, *d))
 }
 
-pub fn arrow_for(d: Direction) -> char {
+#[must_use]
+pub const fn arrow_for(d: Direction) -> char {
     match d {
         Direction::Left => UNICODE.arrow_left,
         Direction::Right => UNICODE.arrow_right,
@@ -239,7 +250,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "can't connect")]
     fn connecting_an_arrow_panics() {
-        connect('►', Direction::Up);
+        let _ = connect('►', Direction::Up);
     }
 
     #[test]

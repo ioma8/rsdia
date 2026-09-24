@@ -1,6 +1,6 @@
 //! Drags a straight line segment sideways, stretching attached lines.
 //!
-//! Ported from ASCIIFlow (`client/draw/move.ts`), MIT © Lewis Hemens.
+//! Ported from `ASCIIFlow` (`client/draw/move.ts`), MIT © Lewis Hemens.
 
 use crate::core::canvas::Canvas;
 use crate::core::glyphs::{connects, is_arrow, is_special, UNICODE};
@@ -21,7 +21,7 @@ struct LineTrace {
     attachments: Vec<AttachmentTrace>,
 }
 
-fn is_straight(v: Option<char>) -> bool {
+const fn is_straight(v: Option<char>) -> bool {
     matches!(v, Some(c) if c == UNICODE.line_horizontal || c == UNICODE.line_vertical)
 }
 

@@ -9,7 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use rsdia::core::layer::Layer;
-use rsdia::core::vector::Pos;
+use rsdia::core::vector::{index, px, units, wide, Pos};
 use rsdia::storage::config::DEFAULT_CONFIG;
 use rsdia::storage::drawings::DrawingStore;
 use rsdia::tui::app::{App, AppOptions, Clipboard, OpenDrawing};
@@ -79,8 +79,7 @@ impl Harness {
                     .map(|x| {
                         self.buf
                             .cell((x, y))
-                            .map(|c| c.symbol().chars().next().unwrap_or(' '))
-                            .unwrap_or(' ')
+                            .map_or(' ', |c| c.symbol().chars().next().unwrap_or(' '))
                     })
                     .collect()
             })
@@ -93,19 +92,19 @@ impl Harness {
 
     /// Row the floating picker draws on for this screen.
     fn picker_row(&self) -> i32 {
-        toolbar_row(self.buf.area().height as i32)
+        toolbar_row(i32::from(self.buf.area().height))
     }
 
     /// Screen position of a floating-toolbar label.
     fn label(&mut self, text: &str) -> (i32, i32) {
-        let y = (self.picker_row() + 1) as usize;
+        let y = index(self.picker_row() + 1);
         let lines = self.frame();
-        (char_find(&lines[y], text).unwrap_or(0) as i32, y as i32)
+        (units(char_find(&lines[y], text).unwrap_or(0)), units(y))
     }
 
     fn open_menu(&mut self, label: &str) {
         let lines = self.frame();
-        let x = char_find(&lines[0], label).expect("menu label") as i32;
+        let x = units(char_find(&lines[0], label).expect("menu label"));
         self.click(x, 0);
     }
 
@@ -125,15 +124,15 @@ impl Harness {
             .iter()
             .position(|line| line.contains(label))
             .expect(label);
-        let x = char_find(&lines[y], label).expect(label) as i32;
-        self.click(x, y as i32);
+        let x = units(char_find(&lines[y], label).expect(label));
+        self.click(x, units(y));
     }
 
     fn mouse(&mut self, kind: MouseEventKind, x: i32, y: i32, modifiers: KeyModifiers) {
         self.app.on_mouse(&MouseEvent {
             kind,
-            column: x as u16,
-            row: y as u16,
+            column: px(x),
+            row: px(y),
             modifiers,
         });
     }
@@ -180,7 +179,7 @@ impl Harness {
     }
 
     /// Canvas cell under a screen position.
-    fn cell_at(&self, x: i32, y: i32) -> Pos {
+    const fn cell_at(&self, x: i32, y: i32) -> Pos {
         self.app.viewport.to_canvas(x, y)
     }
 
@@ -226,7 +225,7 @@ fn msedit_chrome_has_menus_line_numbers_and_blue_status() {
         "the menu strip is the stand-in background, not a grey"
     );
 
-    let edit_x = frame[0].find("Edit").expect("Edit menu") as i32;
+    let edit_x = units(frame[0].find("Edit").expect("Edit menu"));
     h.click(edit_x, 0);
     assert!(h.text_frame().contains("Undo"));
     assert!(h.text_frame().contains("Paste"));
@@ -256,7 +255,7 @@ fn the_floating_toolbar_contains_only_tools_near_the_canvas_bottom() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
     let top = h.picker_row();
     let lines = h.frame();
-    let row = &lines[(top + 1) as usize];
+    let row = &lines[index(top + 1)];
     for tool in ["box", "select", "arrow", "line", "text", "eraser"] {
         assert!(row.contains(tool), "{row}");
     }
@@ -266,10 +265,10 @@ fn the_floating_toolbar_contains_only_tools_near_the_canvas_bottom() {
             "duplicated {menu_action}: {row}"
         );
     }
-    assert!(lines[top as usize].contains("┌"));
-    assert!(lines[(top + 2) as usize].contains("┘"));
+    assert!(lines[index(top)].contains("┌"));
+    assert!(lines[index(top + 2)].contains("┘"));
     assert!(
-        lines[(top + 3) as usize].contains("rsdia"),
+        lines[index(top + 3)].contains("rsdia"),
         "the picker sits on the status bar"
     );
 }
@@ -277,7 +276,7 @@ fn the_floating_toolbar_contains_only_tools_near_the_canvas_bottom() {
 #[test]
 fn compact_menus_and_tiny_toolbar_fit_narrow_terminals() {
     let mut h = Harness::new(30, 40, Layer::new(), None);
-    let row = (toolbar_row(40) + 1) as usize;
+    let row = index(toolbar_row(40) + 1);
     assert!(h.frame()[row].contains("box sel arw lin txt ers"));
 
     let mut h = Harness::new(18, 40, Layer::new(), None);
@@ -301,7 +300,7 @@ fn a_tall_panel_leaves_the_floating_toolbar_intact() {
     }
     h.click_menu_item("File", "Drawings");
     assert!(h.text_frame().contains("[delete]"), "the panel is open");
-    let top = toolbar_row(24) as usize;
+    let top = index(toolbar_row(24));
     let lines = h.frame();
     assert!(lines[top].starts_with(" 20 │"), "{}", lines[top]);
     assert!(lines[top].contains('┌'), "torn: {}", lines[top]);
@@ -347,16 +346,16 @@ fn menu_entries_grey_out_and_do_nothing_without_a_subject() {
     h.open_menu("Edit");
     let lines = h.frame();
     let copy_row = lines.iter().position(|l| l.contains("Copy")).expect("Copy");
-    let copy_x = char_find(&lines[copy_row], "Copy").expect("Copy") as u16;
+    let copy_x = wide(char_find(&lines[copy_row], "Copy").expect("Copy"));
     assert_eq!(
         h.buf
-            .cell((copy_x, copy_row as u16))
+            .cell((copy_x, wide(copy_row)))
             .expect("cell")
             .style()
             .fg,
         Some(disabled)
     );
-    h.click(copy_x as i32, copy_row as i32);
+    h.click(i32::from(copy_x), units(copy_row));
     assert!(
         h.app.clipboard.text.is_none(),
         "an inert entry does nothing"
@@ -371,16 +370,16 @@ fn menu_entries_grey_out_and_do_nothing_without_a_subject() {
     h.open_menu("Edit");
     let lines = h.frame();
     let copy_row = lines.iter().position(|l| l.contains("Copy")).expect("Copy");
-    let copy_x = char_find(&lines[copy_row], "Copy").expect("Copy") as u16;
+    let copy_x = wide(char_find(&lines[copy_row], "Copy").expect("Copy"));
     assert_ne!(
         h.buf
-            .cell((copy_x, copy_row as u16))
+            .cell((copy_x, wide(copy_row)))
             .expect("cell")
             .style()
             .fg,
         Some(disabled)
     );
-    h.click(copy_x as i32, copy_row as i32);
+    h.click(i32::from(copy_x), units(copy_row));
     assert!(h
         .app
         .clipboard
@@ -397,7 +396,7 @@ fn menu_entries_grey_out_and_do_nothing_without_a_subject() {
 #[test]
 fn a_dropdown_hangs_off_its_label_however_it_is_clicked() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
-    let label_x = char_find(&h.frame()[0], "File").expect("File") as i32;
+    let label_x = units(char_find(&h.frame()[0], "File").expect("File"));
     let dropdown_x = |h: &mut Harness| {
         h.frame()[1]
             .chars()
@@ -472,8 +471,8 @@ fn arrow_navigation_skips_disabled_entries_and_stops_at_the_ends() {
             .iter()
             .position(|l| l.contains(label))
             .expect("the row");
-        let x = char_find(&lines[row], label).expect("the label") as u16;
-        h.buf.cell((x, row as u16)).expect("cell").style().bg == Some(p.menu_active_bg)
+        let x = wide(char_find(&lines[row], label).expect("the label"));
+        h.buf.cell((x, wide(row))).expect("cell").style().bg == Some(p.menu_active_bg)
     };
 
     h.drag(10, 10, 14, 12, MouseButton::Left);
@@ -718,8 +717,8 @@ fn a_dropdown_row_is_clickable_across_its_whole_width() {
     let lines = h.frame();
     let row = lines.iter().position(|l| l.contains("Undo")).expect("Undo");
     // Well past the text, still on the row.
-    let x = char_find(&lines[row], "Ctrl+Z").expect("the accelerator") as i32 + 1;
-    h.click(x, row as i32);
+    let x = units(char_find(&lines[row], "Ctrl+Z").expect("the accelerator")) + 1;
+    h.click(x, units(row));
     assert_eq!(h.committed_len(), 0, "undo ran from the row's tail");
     assert_eq!(h.app.panel, None);
 }
@@ -730,7 +729,7 @@ fn hovering_another_menu_label_switches_the_open_dropdown() {
     h.open_menu("File");
     assert_eq!(h.app.panel, Some(PanelId::FileMenu));
     assert!(h.text_frame().contains("Drawings"));
-    let x = char_find(&h.frame()[0], "View").expect("View") as i32;
+    let x = units(char_find(&h.frame()[0], "View").expect("View"));
     h.mouse(MouseEventKind::Moved, x, 0, KeyModifiers::empty());
     h.render();
     assert_eq!(h.app.panel, Some(PanelId::ViewMenu));
@@ -1051,8 +1050,8 @@ fn a_new_drawing_via_the_dialog_and_a_switch_back_from_the_list() {
         .iter()
         .position(|l| l.contains("[new]"))
         .expect("[new]");
-    let x_new = char_find(&lines[y_new], "[").expect("[") as i32 + 1;
-    h.click(x_new, y_new as i32);
+    let x_new = units(char_find(&lines[y_new], "[").expect("[")) + 1;
+    h.click(x_new, units(y_new));
     assert!(h.text_frame().contains("new drawing"));
     h.key(KeyCode::Char('u'), KeyModifiers::CONTROL);
     h.type_text("second");
@@ -1067,8 +1066,8 @@ fn a_new_drawing_via_the_dialog_and_a_switch_back_from_the_list() {
         .iter()
         .position(|l| l.contains("  test "))
         .expect("the test row");
-    let x_test = char_find(&lines[y_test], "test").expect("t") as i32;
-    h.click(x_test, y_test as i32);
+    let x_test = units(char_find(&lines[y_test], "test").expect("t"));
+    h.click(x_test, units(y_test));
     assert_eq!(h.app.drawing_name(), "test");
     assert_eq!(h.committed_len(), 12);
 }
@@ -1099,8 +1098,8 @@ fn the_export_dialog_previews_switches_charset_and_copies() {
         .iter()
         .position(|l| l.contains("basic"))
         .expect("basic");
-    let x = char_find(&frame[y], "basic").expect("basic") as i32;
-    h.click(x, y as i32);
+    let x = units(char_find(&frame[y], "basic").expect("basic"));
+    h.click(x, units(y));
     assert!(h.text_frame().contains("+---+"));
 
     let frame = h.frame();
@@ -1108,16 +1107,16 @@ fn the_export_dialog_previews_switches_charset_and_copies() {
         .iter()
         .position(|l| l.contains("# hash"))
         .expect("hash");
-    let x = char_find(&frame[y], "#").expect("#") as i32;
-    h.click(x, y as i32);
+    let x = units(char_find(&frame[y], "#").expect("#"));
+    h.click(x, units(y));
 
     let frame = h.frame();
     let y = frame
         .iter()
         .position(|l| l.contains("[copy to clipboard]"))
         .expect("copy");
-    let x = char_find(&frame[y], "[").expect("[") as i32 + 1;
-    h.click(x, y as i32);
+    let x = units(char_find(&frame[y], "[").expect("[")) + 1;
+    h.click(x, units(y));
     assert_eq!(
         h.app.clipboard.text.as_deref(),
         Some("# +---+\n# |   |\n# +---+")
@@ -1159,7 +1158,7 @@ fn recentering_centers_the_drawing_in_the_strip_above_the_picker() {
     h.render();
 
     let lines = h.frame();
-    let picker = toolbar_row(40) as usize;
+    let picker = index(toolbar_row(40));
     // Column 5 onwards skips the gutter's own rule.
     let drawn: Vec<usize> = (1..picker)
         .filter(|r| lines[*r].chars().skip(5).any(|c| "┌└─│".contains(c)))
@@ -1180,7 +1179,7 @@ fn the_view_menu_recenters_a_panned_canvas() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
     // The picker's own frame contains `┌`, so look only at the canvas rows.
     let box_visible = |h: &mut Harness| {
-        let top = toolbar_row(40) as usize;
+        let top = index(toolbar_row(40));
         h.frame()[1..top].iter().any(|line| line.contains('┌'))
     };
     h.drag(10, 10, 20, 16, MouseButton::Left);
@@ -1253,8 +1252,8 @@ fn the_copy_on_select_toggle_shows_and_flips() {
         .iter()
         .position(|l| l.contains("copy on select:"))
         .expect("the row");
-    let x = char_find(&lines[y], "off").expect("off") as i32;
-    h.click(x, y as i32);
+    let x = units(char_find(&lines[y], "off").expect("off"));
+    h.click(x, units(y));
     assert!(h.text_frame().contains("copy on select: on"));
     assert!(h.app.config.copy_on_select);
 }
@@ -1304,8 +1303,8 @@ fn deleting_a_drawing_asks_first_and_creates_a_fresh_one_afterwards() {
         .iter()
         .position(|l| l.contains("[delete]"))
         .expect("[delete]");
-    let x_delete = char_find(&lines[y_delete], "[").expect("[") as i32 + 1;
-    h.click(x_delete, y_delete as i32);
+    let x_delete = units(char_find(&lines[y_delete], "[").expect("[")) + 1;
+    h.click(x_delete, units(y_delete));
     assert!(h
         .text_frame()
         .contains("delete \"test\"? this can't be undone."));
@@ -1340,8 +1339,8 @@ fn the_save_export_prompt_writes_a_file() {
         .iter()
         .position(|l| l.contains("[save…]"))
         .expect("[save…]");
-    let x = char_find(&lines[y], "[save…]").expect("[save…]") as i32 + 1;
-    h.click(x, y as i32);
+    let x = units(char_find(&lines[y], "[save…]").expect("[save…]")) + 1;
+    h.click(x, units(y));
     assert!(h.text_frame().contains("save export"));
 
     let out = h.dir.join("diagram.txt");

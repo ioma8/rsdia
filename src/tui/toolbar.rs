@@ -1,8 +1,9 @@
 //! Floating tool picker near the bottom of the canvas.
 
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier, Style};
 
-use crate::core::editor::{ToolId, TOOL_IDS};
+use crate::core::editor::ToolId;
+use crate::core::vector::units;
 use crate::tui::host::Host;
 use crate::tui::painter::{Action, Btn, ItemId, Painter, PanelId, Rect};
 use crate::tui::theme::Palette;
@@ -67,8 +68,8 @@ const FORMS: [Form; 3] = [
 
 fn form_width(form: &Form) -> i32 {
     2 + form.pad * 2
-        + form.items.iter().map(|i| i.label.len() as i32).sum::<i32>()
-        + form.items.len() as i32
+        + form.items.iter().map(|i| units(i.label.len())).sum::<i32>()
+        + units(form.items.len())
         - 1
 }
 
@@ -103,7 +104,7 @@ fn menubar_width(compact: bool) -> i32 {
         .iter()
         .map(|(full, short, _)| {
             let label = if compact { *short } else { *full };
-            label.len() as i32 + 3
+            units(label.len()) + 3
         })
         .sum::<i32>()
         - 1
@@ -116,7 +117,7 @@ fn menu_entry(panel: PanelId, width: i32) -> Option<(&'static str, i32, i32)> {
     let mut x = 1;
     for (full, short, entry) in MENUS {
         let label = if compact { short } else { full };
-        let w = label.len() as i32 + 2;
+        let w = units(label.len()) + 2;
         if entry == panel {
             return Some((label, x, w));
         }
@@ -146,21 +147,14 @@ pub(crate) fn menu_for_mnemonic(c: char) -> Option<PanelId> {
 
 pub(crate) fn render_menubar(p: &mut Painter, host: &dyn Host) {
     let pal = p.pal;
-    p.fill(
-        Rect {
-            x: 0,
-            y: MENU_Y,
-            w: p.width,
-            h: 1,
-        },
-        pal.menu_bg,
-    );
-    p.chrome.push(Rect {
+    let strip = Rect {
         x: 0,
         y: MENU_Y,
         w: p.width,
         h: 1,
-    });
+    };
+    p.fill(strip, pal.menu_bg);
+    p.chrome.push(strip);
     for (_, _, panel) in MENUS {
         let Some((label, x, w)) = menu_entry(panel, p.width) else {
             continue;
@@ -182,24 +176,26 @@ pub(crate) fn render_menubar(p: &mut Painter, host: &dyn Host) {
             },
             bg,
         );
-        let modifier = if active {
-            ratatui::style::Modifier::BOLD
-        } else {
-            ratatui::style::Modifier::empty()
-        };
-        p.text_clipped(x + 1, MENU_Y, label, fg, bg, modifier, x + w);
-        p.hotspots.push(crate::tui::painter::Hotspot {
-            action: Action::Panel(panel),
-            x,
-            y: MENU_Y,
-            w,
-            h: 1,
-        });
+        let mut style = Style::new().fg(fg).bg(bg);
+        if active {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        p.text_clipped(x + 1, MENU_Y, label, style, x + w);
+        p.hotspot(
+            Action::Panel(panel),
+            Rect {
+                x,
+                y: MENU_Y,
+                w,
+                h: 1,
+            },
+        );
     }
 }
 
 /// The row the floating picker occupies: three rows sitting directly on the
 /// status bar, floating over the canvas above it.
+#[must_use]
 pub fn toolbar_row(screen_height: i32) -> i32 {
     (screen_height - 4).max(1)
 }
@@ -221,14 +217,14 @@ pub(crate) fn layout_toolbar(screen_width: i32, screen_height: i32) -> ToolbarLa
                 label: item.label,
                 x: *cx,
             };
-            *cx += item.label.len() as i32 + 1;
+            *cx += units(item.label.len()) + 1;
             Some(span)
         })
         .collect();
     ToolbarLayout { x, y, w, items }
 }
 
-pub(crate) fn tool_color(pal: &Palette, id: ToolId) -> Color {
+pub(crate) const fn tool_color(pal: &Palette, id: ToolId) -> Color {
     match id {
         ToolId::Box => pal.cyan,
         ToolId::Select => pal.success,
@@ -241,7 +237,8 @@ pub(crate) fn tool_color(pal: &Palette, id: ToolId) -> Color {
 
 pub(crate) fn render_toolbar(p: &mut Painter, host: &dyn Host, layout: &ToolbarLayout) {
     let pal = p.pal;
-    p.panel(
+    // The picker is border-only: no title, no count.
+    p.titled_panel(
         Rect {
             x: layout.x,
             y: layout.y,
@@ -250,36 +247,35 @@ pub(crate) fn render_toolbar(p: &mut Painter, host: &dyn Host, layout: &ToolbarL
         },
         pal.tb_border,
         pal.tb_bg,
+        None,
+        None,
     );
     let row = layout.y + 1;
+    let chips = host.show_chips();
+    // The picker's items are the tools, in order, so the digit is the count.
+    let mut nth = 0;
     for span in &layout.items {
         let ItemId::Tool(tool_id) = span.id else {
             continue;
         };
+        nth += 1;
+        let active = (host.tool() == tool_id).then_some(tool_color(&pal, tool_id));
         p.button(
             Action::Toolbar(span.id),
             span.x,
             row,
             span.label,
-            Btn::default()
-                .active(host.tool() == tool_id)
-                .active_color(tool_color(&pal, tool_id)),
+            Btn::default().active_color(active),
         );
-    }
-
-    if host.show_chips() {
-        for span in &layout.items {
-            if let ItemId::Tool(tool_id) = span.id {
-                let i = TOOL_IDS.iter().position(|t| *t == tool_id).unwrap_or(0);
-                p.cell(
-                    span.x,
-                    layout.y + 2,
-                    &(i + 1).to_string(),
-                    pal.bg,
-                    pal.warning,
-                    ratatui::style::Modifier::BOLD,
-                );
-            }
+        if chips {
+            p.cell(
+                span.x,
+                layout.y + 2,
+                &nth.to_string(),
+                pal.bg,
+                pal.warning,
+                ratatui::style::Modifier::BOLD,
+            );
         }
     }
 }

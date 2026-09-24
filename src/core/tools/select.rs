@@ -1,6 +1,6 @@
 //! Entity-aware select & move tool.
 //!
-//! Ported from ASCIIFlow (`client/draw/select.ts`), MIT © Lewis Hemens, plus
+//! Ported from `ASCIIFlow` (`client/draw/select.ts`), MIT © Lewis Hemens, plus
 //! rsdia's keyboard nudge, clipboard and paste.
 
 use crate::core::canvas::Canvas;
@@ -28,7 +28,7 @@ struct LineReshape {
     moved: bool,
 }
 
-fn nudge(key: Key) -> Option<Pos> {
+const fn nudge(key: Key) -> Option<Pos> {
     match key {
         Key::Up => Some(Pos::new(0, -1)),
         Key::Down => Some(Pos::new(0, 1)),
@@ -46,22 +46,35 @@ fn dedupe(cells: Vec<Pos>) -> Vec<Pos> {
         .collect()
 }
 
+/// What the mouse is doing right now. `start` picks one of these and only ends it,
+/// so at most one is ever live — the priority the old flag ladder encoded by hand.
+enum Gesture {
+    /// Rubber-band selection from where the press landed.
+    Selecting { anchor: Pos },
+    /// Dragging the selection, or a whole box, from where the press landed.
+    Dragging {
+        start: Pos,
+        end: Pos,
+        attachments: Vec<BoxAttachment>,
+    },
+    /// Pulling one end of a line to a new corner.
+    Reshaping(LineReshape),
+    /// Sliding a straight segment, which `MoveTool` does.
+    Moving(MoveTool),
+}
+
 #[derive(Default)]
 pub struct SelectTool {
     pub select_box: Option<Bounds>,
     selected_cells: Vec<Pos>,
-    selecting: bool,
-    select_anchor: Option<Pos>,
-    drag_start: Option<Pos>,
-    drag_end: Option<Pos>,
-    move_tool: Option<MoveTool>,
-    line_reshape: Option<LineReshape>,
+    gesture: Option<Gesture>,
+    /// The box the current selection came from, whose attachments reflow with it.
     active_box: Option<Bounds>,
-    attachments: Vec<BoxAttachment>,
 }
 
 impl SelectTool {
-    pub fn has_selection(&self, canvas: &Canvas) -> bool {
+    #[must_use]
+    pub const fn has_selection(&self, canvas: &Canvas) -> bool {
         !self.selected_cells.is_empty() && canvas.selection.is_some()
     }
 
@@ -80,45 +93,52 @@ impl SelectTool {
     }
 
     fn start_select(&mut self, canvas: &mut Canvas, p: Pos) {
-        self.selecting = true;
-        self.select_anchor = Some(p);
+        self.gesture = Some(Gesture::Selecting { anchor: p });
         self.select_box = Some(Bounds::new(p, p));
         self.selected_cells = Vec::new();
         self.active_box = None;
         canvas.set_selection(self.select_box);
     }
 
-    fn move_select(&mut self, canvas: &mut Canvas, p: Pos) {
-        let anchor = self.select_anchor.expect("a selection drag has an anchor");
+    const fn move_select(&mut self, canvas: &mut Canvas, anchor: Pos, p: Pos) {
         self.select_box = Some(Bounds::new(anchor, p));
         canvas.set_selection(self.select_box);
     }
 
-    fn finish_select(&mut self, canvas: &mut Canvas) {
+    fn finish_select(&mut self, canvas: &Canvas) {
         let Some(b) = self.select_box else { return };
         self.selected_cells = cells_in_box(&canvas.committed, b);
         // A rubber-band selection moves like a box: lines crossing its edge reflow.
         self.active_box = self.select_box;
     }
 
-    fn begin_drag(&mut self, canvas: &mut Canvas, p: Pos) {
-        self.drag_start = Some(p);
-        self.drag_end = Some(p);
-        self.attachments = match self.active_box {
-            Some(b) => trace_box_attachments(&canvas.committed, b),
-            None => Vec::new(),
-        };
+    fn begin_drag(&mut self, canvas: &Canvas, p: Pos) {
+        let attachments = self
+            .active_box
+            .map_or_else(Vec::new, |b| trace_box_attachments(&canvas.committed, b));
+        self.gesture = Some(Gesture::Dragging {
+            start: p,
+            end: p,
+            attachments,
+        });
     }
 
     fn move_drag(&mut self, canvas: &mut Canvas, p: Pos) {
-        self.drag_end = Some(p);
-        let Some(start) = self.drag_start else { return };
-        let delta = p.subtract(start);
+        let Some(Gesture::Dragging {
+            start,
+            end,
+            attachments,
+        }) = self.gesture.as_mut()
+        else {
+            return;
+        };
+        *end = p;
+        let delta = p.subtract(*start);
         if let Some(b) = self.active_box {
             canvas.set_scratch(move_box_with_attachments(
                 &canvas.committed,
                 b,
-                &self.attachments,
+                attachments,
                 delta,
             ));
             canvas.set_selection(Some(b.translate(delta)));
@@ -131,7 +151,7 @@ impl SelectTool {
     }
 
     fn reshape_tip(&mut self, canvas: &mut Canvas, target: Pos, m: Mods) {
-        let Some(r) = self.line_reshape.as_mut() else {
+        let Some(Gesture::Reshaping(r)) = self.gesture.as_mut() else {
             return;
         };
         r.moved = true;
@@ -171,6 +191,7 @@ impl SelectTool {
     }
 
     /// Text of the current selection, or `None`.
+    #[must_use]
     pub fn copy_selection(&self, canvas: &Canvas) -> Option<String> {
         let b = self.select_box?;
         canvas.selection.as_ref()?;
@@ -226,13 +247,13 @@ impl Tool for SelectTool {
 
         if let Some(tip) = detect_line_tip(&canvas.committed, p) {
             let trace = trace_line_from_tip(&canvas.committed, tip.tip, tip.body_dir);
-            self.line_reshape = Some(LineReshape {
+            self.gesture = Some(Gesture::Reshaping(LineReshape {
                 cells: trace.cells,
                 anchor: trace.anchor,
                 is_arrow: tip.arrow.is_some(),
                 horizontal_segment: tip.horizontal,
                 moved: false,
-            });
+            }));
             return;
         }
 
@@ -245,7 +266,7 @@ impl Tool for SelectTool {
         if value.is_some_and(is_box_drawing) {
             let mut move_tool = MoveTool::default();
             move_tool.start(canvas, p, Mods::NONE);
-            self.move_tool = Some(move_tool);
+            self.gesture = Some(Gesture::Moving(move_tool));
             return;
         }
 
@@ -261,58 +282,57 @@ impl Tool for SelectTool {
     }
 
     fn move_to(&mut self, canvas: &mut Canvas, p: Pos, m: Mods) {
-        if self.line_reshape.is_some() {
-            self.reshape_tip(canvas, p, m);
-        } else if self.drag_start.is_some() {
-            self.move_drag(canvas, p);
-        } else if let Some(tool) = self.move_tool.as_mut() {
-            tool.move_to(canvas, p, m);
-        } else if self.selecting {
-            self.move_select(canvas, p);
+        if matches!(self.gesture, Some(Gesture::Reshaping(_))) {
+            return self.reshape_tip(canvas, p, m);
+        }
+        if matches!(self.gesture, Some(Gesture::Dragging { .. })) {
+            return self.move_drag(canvas, p);
+        }
+        if let Some(Gesture::Moving(tool)) = self.gesture.as_mut() {
+            return tool.move_to(canvas, p, m);
+        }
+        if let Some(Gesture::Selecting { anchor }) = &self.gesture {
+            let anchor = *anchor;
+            self.move_select(canvas, anchor, p);
         }
     }
 
     fn end(&mut self, canvas: &mut Canvas) {
-        if let Some(r) = self.line_reshape.take() {
-            if r.moved {
+        match self.gesture.take() {
+            // A line that was moved becomes a commit; a click on one just cancels.
+            Some(Gesture::Reshaping(r)) => {
+                if r.moved {
+                    canvas.commit_scratch();
+                } else {
+                    canvas.clear_scratch();
+                }
+            }
+            Some(Gesture::Dragging { start, end, .. }) => {
+                let delta = end.subtract(start);
+                let box_at_drag = self.active_box;
                 canvas.commit_scratch();
-            } else {
-                canvas.clear_scratch();
+                if let Some(b) = box_at_drag {
+                    let moved = b.translate(delta);
+                    self.selected_cells = cells_in_box(&canvas.committed, moved);
+                    self.select_box = Some(moved);
+                    self.active_box = Some(moved);
+                    canvas.set_selection(Some(moved));
+                } else {
+                    let cells = self.selected_cells.iter().map(|c| c.add(delta)).collect();
+                    self.set_selection(canvas, cells, true);
+                }
             }
-        } else if let (Some(start), Some(end)) = (self.drag_start, self.drag_end) {
-            let delta = end.subtract(start);
-            let box_at_drag = self.active_box;
-            canvas.commit_scratch();
-            if let Some(b) = box_at_drag {
-                let moved = b.translate(delta);
-                self.selected_cells = cells_in_box(&canvas.committed, moved);
-                self.select_box = Some(moved);
-                self.active_box = Some(moved);
-                canvas.set_selection(Some(moved));
-            } else {
-                let cells = self.selected_cells.iter().map(|c| c.add(delta)).collect();
-                self.set_selection(canvas, cells, true);
-            }
-        } else if let Some(mut tool) = self.move_tool.take() {
-            tool.end(canvas);
-        } else if self.selecting {
-            self.finish_select(canvas);
+            Some(Gesture::Moving(mut tool)) => tool.end(canvas),
+            Some(Gesture::Selecting { .. }) => self.finish_select(canvas),
+            None => {}
         }
-        self.drag_start = None;
-        self.drag_end = None;
-        self.selecting = false;
     }
 
     fn cleanup(&mut self, canvas: &mut Canvas) {
         self.selected_cells = Vec::new();
         self.select_box = None;
         self.active_box = None;
-        self.attachments = Vec::new();
-        self.line_reshape = None;
-        self.move_tool = None;
-        self.drag_start = None;
-        self.drag_end = None;
-        self.selecting = false;
+        self.gesture = None;
         canvas.clear_selection();
         canvas.clear_scratch();
     }
@@ -324,7 +344,11 @@ impl Tool for SelectTool {
         let Some(delta) = nudge(key) else {
             return false;
         };
-        if self.has_selection(canvas) && self.drag_start.is_none() && !self.selecting {
+        let mid_gesture = matches!(
+            self.gesture,
+            Some(Gesture::Dragging { .. } | Gesture::Selecting { .. })
+        );
+        if self.has_selection(canvas) && !mid_gesture {
             let from = self.select_box.expect("a selection has a box").top_left();
             self.begin_drag(canvas, from);
             self.move_drag(canvas, from.add(delta));

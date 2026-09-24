@@ -11,6 +11,7 @@ fn blocked(k: &KeyEvent) -> bool {
 }
 
 /// The printable character a key produces, if any.
+#[must_use]
 pub fn printable(k: &KeyEvent) -> Option<char> {
     if blocked(k) {
         return None;
@@ -28,7 +29,8 @@ pub fn printable(k: &KeyEvent) -> Option<char> {
 }
 
 /// Alt on its own, so a ctrl+alt chord is never read as a mnemonic.
-pub fn is_alt(k: &KeyEvent) -> bool {
+#[must_use]
+pub const fn is_alt(k: &KeyEvent) -> bool {
     k.modifiers.contains(KeyModifiers::ALT) && !k.modifiers.contains(KeyModifiers::CONTROL)
 }
 
@@ -47,7 +49,8 @@ pub fn tool_key(k: &KeyEvent) -> Option<Key> {
 }
 
 /// The `ctrl+<char>` binding a key carries, if any. Ctrl+Shift+Z reports as `z` too.
-pub fn ctrl_char(k: &KeyEvent) -> Option<char> {
+#[must_use]
+pub const fn ctrl_char(k: &KeyEvent) -> Option<char> {
     if !k.modifiers.contains(KeyModifiers::CONTROL) || k.modifiers.contains(KeyModifiers::ALT) {
         return None;
     }
@@ -57,11 +60,13 @@ pub fn ctrl_char(k: &KeyEvent) -> Option<char> {
     }
 }
 
+#[must_use]
 pub fn is_ctrl(k: &KeyEvent, c: char) -> bool {
     ctrl_char(k) == Some(c)
 }
 
 /// Alt+1..6 arrives as ESC+digit (meta) or as option on macOS with kitty keys.
+#[must_use]
 pub fn alt_digit(k: &KeyEvent) -> Option<usize> {
     if !is_alt(k) {
         return None;
@@ -72,7 +77,8 @@ pub fn alt_digit(k: &KeyEvent) -> Option<usize> {
     }
 }
 
-pub fn is_shift(k: &KeyEvent) -> bool {
+#[must_use]
+pub const fn is_shift(k: &KeyEvent) -> bool {
     k.modifiers.contains(KeyModifiers::SHIFT)
         || matches!(k.code, KeyCode::Char(c) if c.is_ascii_uppercase())
 }

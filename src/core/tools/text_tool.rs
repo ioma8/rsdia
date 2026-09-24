@@ -1,6 +1,6 @@
 //! Text tool.
 //!
-//! Based on ASCIIFlow (`client/draw/text.ts`), MIT © Lewis Hemens.
+//! Based on `ASCIIFlow` (`client/draw/text.ts`), MIT © Lewis Hemens.
 //! rsdia changes: Enter starts a new line under the start column, Escape
 //! commits, and each session has its own keystroke undo stack.
 
@@ -27,7 +27,8 @@ pub struct TextTool {
 
 impl TextTool {
     /// A cursor is placed, so printable keys are text, not shortcuts.
-    pub fn editing(&self) -> bool {
+    #[must_use]
+    pub const fn editing(&self) -> bool {
         self.cursor.is_some()
     }
 
@@ -63,6 +64,7 @@ impl TextTool {
     }
 
     /// The most recent keystroke, if it was a typed space (used by space-to-pan).
+    #[must_use]
     pub fn last_typed_space(&self) -> bool {
         matches!(self.history.last().map(|s| s.typed), Some(Key::Char(' ')))
     }

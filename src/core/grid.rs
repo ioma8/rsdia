@@ -10,56 +10,69 @@ pub struct Bounds {
 }
 
 impl Bounds {
+    #[must_use]
     pub const fn new(start: Pos, end: Pos) -> Self {
         Self { start, end }
     }
 
+    #[must_use]
     pub fn left(&self) -> i32 {
         self.start.x.min(self.end.x)
     }
 
+    #[must_use]
     pub fn right(&self) -> i32 {
         self.start.x.max(self.end.x)
     }
 
+    #[must_use]
     pub fn top(&self) -> i32 {
         self.start.y.min(self.end.y)
     }
 
+    #[must_use]
     pub fn bottom(&self) -> i32 {
         self.start.y.max(self.end.y)
     }
 
+    #[must_use]
     pub fn width(&self) -> i32 {
         self.right() - self.left() + 1
     }
 
+    #[must_use]
     pub fn height(&self) -> i32 {
         self.bottom() - self.top() + 1
     }
 
+    #[must_use]
     pub fn top_left(&self) -> Pos {
         Pos::new(self.left(), self.top())
     }
 
+    #[must_use]
     pub fn top_right(&self) -> Pos {
         Pos::new(self.right(), self.top())
     }
 
+    #[must_use]
     pub fn bottom_left(&self) -> Pos {
         Pos::new(self.left(), self.bottom())
     }
 
+    #[must_use]
     pub fn bottom_right(&self) -> Pos {
         Pos::new(self.right(), self.bottom())
     }
 
+    #[must_use]
     pub fn contains(&self, p: Pos) -> bool {
         p.x >= self.left() && p.x <= self.right() && p.y >= self.top() && p.y <= self.bottom()
     }
 
-    pub fn translate(&self, delta: Pos) -> Bounds {
-        Bounds::new(self.top_left().add(delta), self.bottom_right().add(delta))
+    #[must_use]
+    pub fn translate(&self, delta: Pos) -> Self {
+        Self::new(self.top_left().add(delta), self.bottom_right().add(delta))
     }
 }
 

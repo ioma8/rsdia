@@ -24,15 +24,17 @@ pub const GRID_STYLES: [GridStyle; 4] = [
 ];
 
 impl GridStyle {
-    pub fn name(self) -> &'static str {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
         match self {
-            GridStyle::Lattice => "lattice",
-            GridStyle::Checker => "checker",
-            GridStyle::Dots => "dots",
-            GridStyle::Off => "off",
+            Self::Lattice => "lattice",
+            Self::Checker => "checker",
+            Self::Dots => "dots",
+            Self::Off => "off",
         }
     }
 
+    #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         GRID_STYLES.into_iter().find(|g| g.name() == value)
     }
@@ -68,6 +70,7 @@ pub const DEFAULT_CONFIG: Config = Config {
     export: DEFAULT_EXPORT,
 };
 
+#[must_use]
 pub fn config_path() -> PathBuf {
     xdg_dir("XDG_CONFIG_HOME", &[".config"])
         .join("rsdia")
@@ -93,11 +96,11 @@ pub fn load_config(path: &Path) -> Config {
             .and_then(|v| v.as_str())
             .and_then(GridStyle::parse)
             .unwrap_or(DEFAULT_CONFIG.grid),
-        copy_on_select: raw.get("copyOnSelect").and_then(|v| v.as_bool()) == Some(true),
+        copy_on_select: raw.get("copyOnSelect").and_then(serde_json::Value::as_bool) == Some(true),
         last_drawing: raw
             .get("lastDrawing")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
+            .map(ToOwned::to_owned),
         export: ExportConfig {
             characters: match export
                 .and_then(|e| e.get("characters"))
@@ -113,7 +116,7 @@ pub fn load_config(path: &Path) -> Config {
                 .unwrap_or(Wrapper::None),
             fenced: export
                 .and_then(|e| e.get("fenced"))
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 == Some(true),
         },
     }
@@ -124,10 +127,10 @@ pub fn save_config(config: &Config, path: &Path) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let last = match &config.last_drawing {
-        Some(p) => json_escape(p),
-        None => "null".to_string(),
-    };
+    let last = config
+        .last_drawing
+        .as_ref()
+        .map_or_else(|| "null".to_string(), |p| json_escape(p));
     let text = format!(
         "{{\n  \"theme\": \"{}\",\n  \"grid\": \"{}\",\n  \"copyOnSelect\": {},\n  \"lastDrawing\": {},\n  \"export\": {{\n    \"characters\": \"{}\",\n    \"wrapper\": \"{}\",\n    \"fenced\": {}\n  }}\n}}\n",
         config.theme.name(),

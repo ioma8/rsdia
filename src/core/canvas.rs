@@ -1,6 +1,6 @@
 //! Committed + scratch layers with undo/redo.
 //!
-//! Mirrors ASCIIFlow's `CanvasStore` (`client/store/canvas.ts`), minus persistence,
+//! Mirrors `ASCIIFlow`'s `CanvasStore` (`client/store/canvas.ts`), minus persistence,
 //! which lives in `storage`.
 
 use super::grid::Bounds;
@@ -18,24 +18,31 @@ pub struct Revision {
     pub committed: u64,
 }
 
+/// One undo step: the diff that reverses the change, and the selection to restore
+/// with it.
+struct Step {
+    diff: Layer,
+    selection: Option<Bounds>,
+}
+
 #[derive(Default)]
 pub struct Canvas {
     pub committed: Layer,
     pub scratch: Layer,
     pub selection: Option<Bounds>,
-    undo_layers: Vec<Layer>,
-    redo_layers: Vec<Layer>,
-    undo_selections: Vec<Option<Bounds>>,
-    redo_selections: Vec<Option<Bounds>>,
+    undo: Vec<Step>,
+    redo: Vec<Step>,
     pending_selection: Option<Bounds>,
     revision: Revision,
 }
 
 impl Canvas {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn with_committed(committed: Layer) -> Self {
         Self {
             committed,
@@ -43,36 +50,40 @@ impl Canvas {
         }
     }
 
-    pub fn revision(&self) -> Revision {
+    #[must_use]
+    pub const fn revision(&self) -> Revision {
         self.revision
     }
 
-    pub fn can_undo(&self) -> bool {
-        !self.undo_layers.is_empty()
+    #[must_use]
+    pub const fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
     }
 
-    pub fn can_redo(&self) -> bool {
-        !self.redo_layers.is_empty()
+    #[must_use]
+    pub const fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
     }
 
     /// The glyph shown at `p`: scratch over committed, erase markers hidden.
+    #[must_use]
     pub fn glyph_at(&self, p: Pos) -> Option<char> {
         self.scratch.glyph(p).or_else(|| self.committed.glyph(p))
     }
 
-    fn notify(&mut self, committed: bool) {
+    const fn notify(&mut self, committed: bool) {
         self.revision.any += 1;
         if committed {
             self.revision.committed += 1;
         }
     }
 
-    pub fn set_selection(&mut self, bounds: Option<Bounds>) {
+    pub const fn set_selection(&mut self, bounds: Option<Bounds>) {
         self.selection = bounds;
         self.notify(false);
     }
 
-    pub fn clear_selection(&mut self) {
+    pub const fn clear_selection(&mut self) {
         self.set_selection(None);
     }
 
@@ -90,12 +101,10 @@ impl Canvas {
         self.notify(false);
     }
 
-    fn push_undo(&mut self, layer: Layer, selection: Option<Bounds>) {
-        self.undo_layers.push(layer);
-        self.undo_selections.push(selection);
-        if self.undo_layers.len() > MAX_UNDO {
-            self.undo_layers.remove(0);
-            self.undo_selections.remove(0);
+    fn push_undo(&mut self, diff: Layer, selection: Option<Bounds>) {
+        self.undo.push(Step { diff, selection });
+        if self.undo.len() > MAX_UNDO {
+            self.undo.remove(0);
         }
     }
 
@@ -110,8 +119,7 @@ impl Canvas {
         self.committed = next;
         let pending = self.pending_selection.take();
         self.push_undo(undo, pending);
-        self.redo_layers.clear();
-        self.redo_selections.clear();
+        self.redo.clear();
         self.notify(true);
         true
     }
@@ -132,32 +140,35 @@ impl Canvas {
         self.commit(diff);
     }
 
-    pub fn undo(&mut self) -> bool {
-        let Some(diff) = self.undo_layers.pop() else {
+    /// Moves one step between the two stacks: applies its diff and records the
+    /// reversal, with the selection as it stood, so undo and redo mirror exactly.
+    fn step(&mut self, backwards: bool) -> bool {
+        let (from, to) = if backwards {
+            (&mut self.undo, &mut self.redo)
+        } else {
+            (&mut self.redo, &mut self.undo)
+        };
+        let Some(entry) = from.pop() else {
             return false;
         };
-        let (next, redo) = self.committed.apply(&diff);
+        let (next, reversal) = self.committed.apply(&entry.diff);
         self.committed = next;
-        self.redo_layers.push(redo);
-        self.redo_selections.push(self.selection);
-        self.selection = self.undo_selections.pop().flatten();
+        to.push(Step {
+            diff: reversal,
+            selection: self.selection,
+        });
+        self.selection = entry.selection;
         self.scratch = Layer::new();
         self.notify(true);
         true
     }
 
+    pub fn undo(&mut self) -> bool {
+        self.step(true)
+    }
+
     pub fn redo(&mut self) -> bool {
-        let Some(diff) = self.redo_layers.pop() else {
-            return false;
-        };
-        let (next, undo) = self.committed.apply(&diff);
-        self.committed = next;
-        self.undo_layers.push(undo);
-        self.undo_selections.push(self.selection);
-        self.selection = self.redo_selections.pop().flatten();
-        self.scratch = Layer::new();
-        self.notify(true);
-        true
+        self.step(false)
     }
 }
 

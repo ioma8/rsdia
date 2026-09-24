@@ -5,44 +5,24 @@
 //! the app draws goes into a `ratatui::Buffer`, so the whole app can be driven
 //! headlessly by the tests.
 
+use crate::core::canvas::{Canvas, Revision};
+use crate::core::editor::{Editor, ToolId};
+use crate::core::export::export_text;
+use crate::core::layer::Layer;
+use crate::core::tools::tool::Mods;
+use crate::core::vector::Pos;
+use crate::storage::config::{save_config, Config};
+use crate::storage::drawings::{DrawingInfo, DrawingStore};
+use crate::tui::canvas_view::Viewport;
+use crate::tui::host::{Dialog, Host};
+use crate::tui::painter::{Action, Hotspot, ItemId, PanelId, Rect};
+use crate::tui::theme::{palette, Palette, TerminalColors};
+use crossterm::clipboard::CopyToClipboard;
+use crossterm::execute;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
-
-use crossterm::clipboard::CopyToClipboard;
-use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
-use crossterm::execute;
-use ratatui::buffer::Buffer;
-
-use crate::core::canvas::{Canvas, Revision};
-use crate::core::editor::{Editor, ToolId, TOOL_IDS};
-use crate::core::export::{export_text, ExportConfig};
-use crate::core::layer::Layer;
-use crate::core::text::{text_size, text_to_layer};
-use crate::core::tools::tool::{Key, Mods};
-use crate::core::vector::Pos;
-use crate::storage::config::{save_config, Config, GridStyle};
-use crate::storage::drawings::{slugify, DrawingInfo, DrawingStore};
-use crate::tui::canvas_view::{render_canvas, CanvasViewState, Viewport};
-use crate::tui::host::{ConfirmKind, Dialog, Host, InputDialog, InputKind};
-use crate::tui::input::{alt_digit, ctrl_char, is_alt, is_ctrl, is_shift, printable, tool_key};
-use crate::tui::painter::{
-    from_area, hotspot_at, in_rect, Action, Hotspot, ItemId, Painter, PanelId, Rect,
-};
-use crate::tui::popovers::{
-    menu_entries, menu_entry_disabled, render_dialog, render_edit_menu, render_export,
-    render_file_menu, render_files, render_help, render_help_menu, render_settings,
-    render_view_menu,
-};
-use crate::tui::theme::{palette, Palette, TerminalColors, ThemeName};
-use crate::tui::toolbar::{
-    layout_toolbar, menu_anchor, menu_for_mnemonic, menu_panels, render_menubar, render_toolbar,
-    tool_color, MENU_Y,
-};
-use ratatui::layout::{Constraint, Layout};
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
 
 pub struct OpenDrawing {
     pub path: PathBuf,
@@ -66,7 +46,7 @@ enum Mode {
     Pan { sx: i32, sy: i32, origin: Pos },
 }
 
-fn tool_hint(tool: ToolId) -> &'static str {
+const fn tool_hint(tool: ToolId) -> &'static str {
     match tool {
         ToolId::Box => "drag to draw a box",
         ToolId::Select => "drag to select or move · del erases · y x p copy/cut/paste",
@@ -77,7 +57,7 @@ fn tool_hint(tool: ToolId) -> &'static str {
     }
 }
 
-fn tool_shortcut(c: char) -> Option<ToolId> {
+const fn tool_shortcut(c: char) -> Option<ToolId> {
     match c {
         'r' => Some(ToolId::Box),
         'v' => Some(ToolId::Select),
@@ -90,14 +70,14 @@ fn tool_shortcut(c: char) -> Option<ToolId> {
 }
 
 /// The four menu-bar dropdowns, as opposed to the tool panels they open.
-fn is_menu(panel: PanelId) -> bool {
+const fn is_menu(panel: PanelId) -> bool {
     matches!(
         panel,
         PanelId::FileMenu | PanelId::EditMenu | PanelId::ViewMenu | PanelId::HelpMenu
     )
 }
 
-fn panel_for(id: ItemId) -> Option<PanelId> {
+const fn panel_for(id: ItemId) -> Option<PanelId> {
     match id {
         ItemId::Files => Some(PanelId::Files),
         ItemId::Export => Some(PanelId::Export),
@@ -118,7 +98,8 @@ pub struct Clipboard {
 }
 
 impl Clipboard {
-    pub fn new(system: bool) -> Self {
+    #[must_use]
+    pub const fn new(system: bool) -> Self {
         Self {
             text: None,
             copies: 0,
@@ -126,7 +107,8 @@ impl Clipboard {
         }
     }
 
-    pub fn memory() -> Self {
+    #[must_use]
+    pub const fn memory() -> Self {
         Self::new(false)
     }
 
@@ -207,6 +189,23 @@ pub struct AppOptions {
     pub autosave_ms: Option<u64>,
 }
 
+/// Where the pointer is, and whether it rests on something the active tool would
+/// grab — which the canvas paints as a highlight.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Pointer {
+    pub at: Option<(i32, i32)>,
+    pub on_target: bool,
+}
+
+/// The drawing's persistence state: whether it changed, when autosave is due, and
+/// how often to schedule it.
+#[derive(Clone, Copy, Debug)]
+struct Save {
+    dirty: bool,
+    due: Option<Instant>,
+    every_ms: u64,
+}
+
 pub struct App {
     pub editor: Editor,
     pub viewport: Viewport,
@@ -223,8 +222,8 @@ pub struct App {
     pub height: i32,
     pub hotspots: Vec<Hotspot>,
     pub chrome: Vec<Rect>,
-    /// The pointer rests on something the active tool would grab.
-    pub hover_is_target: bool,
+    /// Where the pointer is, and whether it rests on something the tool would grab.
+    pub pointer: Pointer,
     pub should_quit: bool,
 
     panel_anchor: i32,
@@ -241,7 +240,6 @@ pub struct App {
     last_copy: Option<String>,
     pressed: Option<(Action, i32, i32)>,
     mode: Mode,
-    hover: Option<(i32, i32)>,
     flip_toggle: bool,
     last_mods: Mods,
     /// Space presses in a row; terminals rarely report releases, so holding is
@@ -249,9 +247,8 @@ pub struct App {
     space_run: (u32, Instant),
     placing: Option<Layer>,
     recenter_soon: bool,
-    save_at: Option<Instant>,
-    dirty: bool,
-    autosave_ms: u64,
+    /// What has changed since the last write, and when the next one is due.
+    save: Save,
     revision: Revision,
 }
 
@@ -260,6 +257,7 @@ mod events;
 mod paint;
 
 impl App {
+    #[must_use]
     pub fn new(opts: AppOptions) -> Self {
         let AppOptions {
             store,
@@ -287,7 +285,7 @@ impl App {
             height: 0,
             hotspots: Vec::new(),
             chrome: Vec::new(),
-            hover_is_target: false,
+            pointer: Pointer::default(),
             should_quit: false,
             panel_anchor: 0,
             menu_index: 0,
@@ -299,15 +297,16 @@ impl App {
             last_copy: None,
             pressed: None,
             mode: Mode::None,
-            hover: None,
             flip_toggle: false,
             last_mods: Mods::NONE,
             space_run: (0, Instant::now()),
             placing: None,
             recenter_soon: true,
-            save_at: None,
-            dirty: false,
-            autosave_ms: autosave_ms.unwrap_or(500),
+            save: Save {
+                dirty: false,
+                due: None,
+                every_ms: autosave_ms.unwrap_or(500),
+            },
             revision: Revision::default(),
         };
         app.revision = app.editor.canvas.revision();
@@ -316,47 +315,58 @@ impl App {
 
     // ---------------------------------------------------------------- state
 
-    pub fn tool(&self) -> ToolId {
+    #[must_use]
+    pub const fn tool(&self) -> ToolId {
         self.editor.tool()
     }
 
+    #[must_use]
     pub fn can_undo(&self) -> bool {
         self.editor.canvas.can_undo()
             || (self.editor.text_entry() && !self.editor.canvas.scratch.is_empty())
     }
 
-    pub fn can_redo(&self) -> bool {
+    #[must_use]
+    pub const fn can_redo(&self) -> bool {
         self.editor.canvas.can_redo()
     }
 
-    pub fn has_selection(&self) -> bool {
+    #[must_use]
+    pub const fn has_selection(&self) -> bool {
         self.editor.has_selection()
     }
 
-    pub fn menu_index(&self) -> usize {
+    #[must_use]
+    pub const fn menu_index(&self) -> usize {
         self.menu_index
     }
 
-    pub fn list_selection(&self) -> Option<usize> {
+    #[must_use]
+    pub const fn list_selection(&self) -> Option<usize> {
         self.list_selection
     }
 
-    pub fn preview_top(&self) -> usize {
+    #[must_use]
+    pub const fn preview_top(&self) -> usize {
         self.preview_top
     }
 
+    #[must_use]
     pub fn show_chips(&self) -> bool {
         self.panel == Some(PanelId::Help) || Instant::now() < self.chips_until
     }
 
+    #[must_use]
     pub fn drawing_name(&self) -> &str {
         &self.drawing.name
     }
 
+    #[must_use]
     pub fn current_path(&self) -> &Path {
         &self.drawing.path
     }
 
+    #[must_use]
     pub fn export_preview(&self) -> String {
         let text = export_text(&self.editor.canvas.committed, &self.config.export);
         if text.is_empty() {
@@ -385,7 +395,7 @@ impl App {
     /// One frame-tick of bookkeeping: due autosaves and the toast/chip clocks.
     pub fn tick(&mut self) {
         self.poll_canvas();
-        if self.save_at.is_some_and(|at| Instant::now() >= at) {
+        if self.save.due.is_some_and(|at| Instant::now() >= at) {
             self.save();
         }
     }
@@ -400,18 +410,18 @@ impl App {
     // ---------------------------------------------------------------- saving
 
     fn schedule_save(&mut self) {
-        self.dirty = true;
-        self.save_at = Some(Instant::now() + Duration::from_millis(self.autosave_ms));
+        self.save.dirty = true;
+        self.save.due = Some(Instant::now() + Duration::from_millis(self.save.every_ms));
     }
 
     pub fn save(&mut self) {
-        self.save_at = None;
+        self.save.due = None;
         let drawing = &self.drawing;
         match self
             .store
             .save(&drawing.path, &drawing.name, &self.editor.canvas.committed)
         {
-            Ok(_) => self.dirty = false,
+            Ok(()) => self.save.dirty = false,
             Err(e) => self.toast(&format!("save failed: {e}")),
         }
     }
@@ -424,7 +434,7 @@ impl App {
     pub fn shutdown(&mut self) {
         self.editor.cancel_gesture();
         self.editor.flush();
-        if self.dirty || self.save_at.is_some() {
+        if self.save.dirty || self.save.due.is_some() {
             self.save();
         }
         self.config.last_drawing = Some(self.drawing.path.to_string_lossy().to_string());
@@ -490,38 +500,38 @@ impl Host for App {
     }
 
     fn export_preview(&self) -> String {
-        App::export_preview(self)
+        Self::export_preview(self)
     }
 
     fn tool(&self) -> ToolId {
-        App::tool(self)
+        Self::tool(self)
     }
 
     fn can_undo(&self) -> bool {
-        App::can_undo(self)
+        Self::can_undo(self)
     }
 
     fn can_redo(&self) -> bool {
-        App::can_redo(self)
+        Self::can_redo(self)
     }
 
     fn has_selection(&self) -> bool {
-        App::has_selection(self)
+        Self::has_selection(self)
     }
 
     fn menu_index(&self) -> usize {
-        App::menu_index(self)
+        Self::menu_index(self)
     }
 
     fn list_selection(&self) -> Option<usize> {
-        App::list_selection(self)
+        Self::list_selection(self)
     }
 
     fn preview_top(&self) -> usize {
-        App::preview_top(self)
+        Self::preview_top(self)
     }
 
     fn show_chips(&self) -> bool {
-        App::show_chips(self)
+        Self::show_chips(self)
     }
 }

@@ -60,7 +60,10 @@ fn fail(message: &str) -> ! {
 }
 
 fn is_path_like(arg: &str) -> bool {
-    arg.contains('/') || arg.ends_with(FILE_EXT) || arg.ends_with(".json")
+    arg.contains('/')
+        || Path::new(arg)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
 }
 
 /// Resolves a CLI argument to a drawing file path, if one exists.
@@ -85,8 +88,7 @@ fn absolute(arg: &str) -> PathBuf {
 fn name_from_path(arg: &str) -> String {
     let base = Path::new(arg)
         .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| arg.to_string());
+        .map_or_else(|| arg.to_string(), |n| n.to_string_lossy().to_string());
     base.strip_suffix(FILE_EXT)
         .or_else(|| base.strip_suffix(".json"))
         .unwrap_or(&base)
@@ -123,15 +125,21 @@ fn open_or_create(store: &DrawingStore, arg: &str) -> OpenDrawing {
     }
 }
 
+/// What to print and stop, if anything: the two flags that are not options.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Print {
+    Help,
+    Version,
+}
+
 /// Every flag both commands understand, with no parser dependency. Value-taking
 /// flags accept `--flag value` and `--flag=value`; anything else is a positional.
 #[derive(Default)]
 struct Args {
     positional: Vec<String>,
-    basic: bool,
+    characters: Charset,
     fenced: bool,
-    help: bool,
-    version: bool,
+    print: Option<Print>,
     comment: Option<String>,
     output: Option<String>,
     import: Option<String>,
@@ -154,10 +162,10 @@ fn parse_args(args: &[String]) -> Args {
             );
         };
         match name {
-            "--basic" => out.basic = true,
+            "--basic" => out.characters = Charset::Basic,
             "--fenced" => out.fenced = true,
-            "--help" | "-h" => out.help = true,
-            "--version" | "-v" => out.version = true,
+            "--help" | "-h" => out.print = Some(Print::Help),
+            "--version" | "-v" => out.print = Some(Print::Version),
             "--comment" => value(&mut out.comment),
             "--output" | "-o" => value(&mut out.output),
             "--import" => value(&mut out.import),
@@ -223,7 +231,7 @@ fn open_pane_command() {
 
 fn export_command(store: &DrawingStore, args: &[String]) {
     let parsed = parse_args(args);
-    if parsed.help {
+    if parsed.print == Some(Print::Help) {
         println!("{}", help(store));
         return;
     }
@@ -239,11 +247,7 @@ fn export_command(store: &DrawingStore, args: &[String]) {
         fail(&format!("unknown comment style \"{comment}\""));
     };
     let config = ExportConfig {
-        characters: if parsed.basic {
-            Charset::Basic
-        } else {
-            Charset::Extended
-        },
+        characters: parsed.characters,
         wrapper,
         fenced: parsed.fenced,
     };
@@ -275,7 +279,7 @@ fn is_tty() -> bool {
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
-fn system_clipboard() -> Clipboard {
+const fn system_clipboard() -> Clipboard {
     Clipboard::new(true)
 }
 
@@ -287,7 +291,7 @@ fn install_signal_restore() {
         // mouse/paste modes the app turned on.
         const EXIT: &[u8] = b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1049l";
         unsafe {
-            libc::write(1, EXIT.as_ptr() as *const libc::c_void, EXIT.len());
+            libc::write(1, EXIT.as_ptr().cast(), EXIT.len());
         }
         unsafe { libc::_exit(0) };
     }
@@ -390,13 +394,16 @@ pub fn main() {
     }
 
     let parsed = parse_args(&argv);
-    if parsed.help {
-        println!("{}", help(&store));
-        return;
-    }
-    if parsed.version {
-        println!("{}", env!("CARGO_PKG_VERSION"));
-        return;
+    match parsed.print {
+        Some(Print::Help) => {
+            println!("{}", help(&store));
+            return;
+        }
+        Some(Print::Version) => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        None => {}
     }
     if !is_tty() {
         fail("needs an interactive terminal (try `rsdia export`)");
@@ -408,10 +415,10 @@ pub fn main() {
         Some(file) => match std::fs::read_to_string(file) {
             Ok(text) => {
                 let base = parsed.positional.first().cloned().unwrap_or_else(|| {
-                    Path::new(file)
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "imported".to_string())
+                    Path::new(file).file_stem().map_or_else(
+                        || "imported".to_string(),
+                        |s| s.to_string_lossy().to_string(),
+                    )
                 });
                 let name = store.unique_name(&base);
                 let layer = text_to_layer(&text, crate::core::vector::Pos::default());
@@ -423,24 +430,22 @@ pub fn main() {
             }
             Err(_) => fail(&format!("can't read {file}")),
         },
-        None => match parsed.positional.first() {
-            Some(arg) => open_or_create(&store, arg),
-            None => match config
-                .last_drawing
-                .clone()
-                .filter(|p| Path::new(p).exists())
-            {
-                Some(last) => open_or_create(&store, &last),
-                None => {
-                    let name = store
+        None => parsed.positional.first().map_or_else(
+            || {
+                let last = config
+                    .last_drawing
+                    .clone()
+                    .filter(|p| Path::new(p).exists());
+                let name = last.unwrap_or_else(|| {
+                    store
                         .list()
                         .first()
-                        .map(|d| d.name.clone())
-                        .unwrap_or_else(|| "untitled".to_string());
-                    open_or_create(&store, &name)
-                }
+                        .map_or_else(|| "untitled".to_string(), |d| d.name.clone())
+                });
+                open_or_create(&store, &name)
             },
-        },
+            |arg| open_or_create(&store, arg),
+        ),
     };
     config.last_drawing = Some(drawing.path.to_string_lossy().to_string());
     save_config(&config, &config_path);

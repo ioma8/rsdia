@@ -7,12 +7,13 @@ use super::vector::Pos;
 /// A layer with no cell at a position. Glyphs are single code points, so a cell
 /// is either absent or holds a `char`.
 ///
-/// erase markers: ASCIIFlow uses `""` and `" "` to mean "delete the cell below".
+/// erase markers: `ASCIIFlow` uses `""` and `" "` to mean "delete the cell below".
 /// Both collapse to [`ERASE`] here, which is why `Layer::apply` treats a space as
 /// a deletion rather than as content.
 pub const ERASE: char = ' ';
 
-pub fn is_erase(c: char) -> bool {
+#[must_use]
+pub const fn is_erase(c: char) -> bool {
     c == ERASE
 }
 
@@ -26,6 +27,7 @@ pub struct Layer {
 }
 
 impl Layer {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -39,15 +41,18 @@ impl Layer {
     }
 
     /// Raw lookup: erase markers come back as `Some(ERASE)`, absent cells as `None`.
+    #[must_use]
     pub fn get(&self, p: Pos) -> Option<char> {
         self.map.get(&p).copied()
     }
 
     /// The glyph a reader wants: `None` for an absent cell or an erase marker.
+    #[must_use]
     pub fn glyph(&self, p: Pos) -> Option<char> {
         self.get(p).filter(|v| !is_erase(*v))
     }
 
+    #[must_use]
     pub fn has(&self, p: Pos) -> bool {
         self.map.contains_key(&p)
     }
@@ -60,10 +65,12 @@ impl Layer {
         self.map.remove(&p);
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
@@ -82,7 +89,7 @@ impl Layer {
     }
 
     /// Copies every entry (erase markers included) from `other` into this layer.
-    pub fn set_from(&mut self, other: &Layer) {
+    pub fn set_from(&mut self, other: &Self) {
         for (p, v) in other.entries() {
             self.map.insert(p, v);
         }
@@ -90,9 +97,10 @@ impl Layer {
 
     /// Applies a diff layer. Returns the resulting layer and the inverse diff that
     /// undoes the operation. Does not mutate `self`.
-    pub fn apply(&self, diff: &Layer) -> (Layer, Layer) {
+    #[must_use]
+    pub fn apply(&self, diff: &Self) -> (Self, Self) {
         let mut next = self.clone();
-        let mut undo = Layer::new();
+        let mut undo = Self::new();
         for (k, v) in diff.entries() {
             let old = self.map.get(&k).copied();
             if is_erase(v) {

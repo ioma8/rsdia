@@ -1,12 +1,26 @@
 //! Drawing a frame: the whole screen, then the status line.
 
-use super::*;
+use super::{tool_hint, App, MIN_HEIGHT, MIN_WIDTH};
+use crate::core::editor::ToolId;
+use crate::core::vector::wide;
+use crate::tui::canvas_view::{render_canvas, CanvasViewState};
+use crate::tui::painter::{from_area, Painter, PanelId, Rect};
+use crate::tui::popovers::{
+    render_dialog, render_edit_menu, render_export, render_file_menu, render_files, render_help,
+    render_help_menu, render_settings, render_view_menu,
+};
+use crate::tui::toolbar::{layout_toolbar, render_menubar, render_toolbar, tool_color, MENU_Y};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use std::time::Instant;
 
 impl App {
     pub fn paint(&mut self, buf: &mut Buffer) {
         let area = buf.area();
-        self.width = area.width as i32;
-        self.height = area.height as i32;
+        self.width = i32::from(area.width);
+        self.height = i32::from(area.height);
         self.hotspots.clear();
         self.chrome.clear();
         if self.width < MIN_WIDTH || self.height < MIN_HEIGHT {
@@ -42,8 +56,8 @@ impl App {
             self.recenter_soon = false;
             self.viewport.recenter(&self.editor, strip);
         }
-        let mut p = Painter::new(buf, self.pal, self.hover);
-        let hover_cell = self.hover.map(|(x, y)| self.viewport.to_canvas(x, y));
+        let mut p = Painter::new(buf, self.pal, self.pointer.at);
+        let hover_cell = self.pointer.at.map(|(x, y)| self.viewport.to_canvas(x, y));
         render_canvas(
             &mut p,
             &CanvasViewState {
@@ -52,7 +66,7 @@ impl App {
                 grid: self.config.grid,
                 top: MENU_Y + 1,
                 hover_cell,
-                hover_is_target: self.hover_is_target,
+                hover_is_target: self.pointer.on_target,
                 cursor_on: true,
             },
         );
@@ -84,7 +98,7 @@ impl App {
         self.chrome = std::mem::take(&mut p.chrome);
     }
 
-    fn paint_status(&mut self, p: &mut Painter) {
+    fn paint_status(&self, p: &mut Painter) {
         let pal = p.pal;
         let y = self.height - 1;
         let row = Rect {
@@ -118,13 +132,13 @@ impl App {
         let right = format!(
             "{}{} · rsdia",
             self.drawing.name,
-            if self.dirty { " •" } else { "" }
+            if self.save.dirty { " •" } else { "" }
         );
         // Two spans that divide the row between them: the hint grows or shrinks with
         // the terminal, the name keeps its width. `Layout` is the idiomatic split.
         let [left, right_area] = Layout::horizontal([
             Constraint::Fill(1),
-            Constraint::Length(right.chars().count() as u16 + 2),
+            Constraint::Length(wide(right.chars().count()) + 2),
         ])
         .areas(p.area(row));
         let tool = self.tool();

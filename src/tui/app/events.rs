@@ -1,9 +1,18 @@
 //! Input: mouse, keyboard and paste reach the app as crossterm events.
 
-use super::*;
+use super::{is_menu, tool_shortcut, App, Mode, SPACE_PAN_MS};
+use crate::core::editor::{ToolId, TOOL_IDS};
+use crate::core::tools::tool::{Key, Mods};
+use crate::core::vector::Pos;
+use crate::tui::host::Dialog;
+use crate::tui::input::{alt_digit, ctrl_char, is_alt, is_ctrl, is_shift, printable, tool_key};
+use crate::tui::painter::{hotspot_at, in_rect, Action, PanelId};
+use crate::tui::toolbar::{menu_anchor, menu_for_mnemonic};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use std::time::{Duration, Instant};
 
 impl App {
-    fn mouse_mods(&self, e: &MouseEvent) -> Mods {
+    const fn mouse_mods(&self, e: MouseEvent) -> Mods {
         let m = Mods::new(
             e.modifiers
                 .contains(crossterm::event::KeyModifiers::CONTROL),
@@ -23,20 +32,20 @@ impl App {
     }
 
     pub fn on_mouse(&mut self, e: &MouseEvent) {
-        let (x, y) = (e.column as i32, e.row as i32);
+        let (x, y) = (i32::from(e.column), i32::from(e.row));
         match e.kind {
-            MouseEventKind::ScrollDown => self.on_scroll(e, 0, 1),
-            MouseEventKind::ScrollUp => self.on_scroll(e, 0, -1),
-            MouseEventKind::ScrollLeft => self.on_scroll(e, -2, 0),
-            MouseEventKind::ScrollRight => self.on_scroll(e, 2, 0),
-            MouseEventKind::Moved | MouseEventKind::Drag(_) => self.on_move(e),
-            MouseEventKind::Down(button) => self.on_down(e, button),
+            MouseEventKind::ScrollDown => self.on_scroll(*e, 0, 1),
+            MouseEventKind::ScrollUp => self.on_scroll(*e, 0, -1),
+            MouseEventKind::ScrollLeft => self.on_scroll(*e, -2, 0),
+            MouseEventKind::ScrollRight => self.on_scroll(*e, 2, 0),
+            MouseEventKind::Moved | MouseEventKind::Drag(_) => self.on_move(*e),
+            MouseEventKind::Down(button) => self.on_down(*e, button),
             MouseEventKind::Up(_) => self.on_up(x, y),
         }
     }
 
-    fn on_scroll(&mut self, e: &MouseEvent, dx: i32, dy: i32) {
-        let (x, y) = (e.column as i32, e.row as i32);
+    fn on_scroll(&mut self, e: MouseEvent, dx: i32, dy: i32) {
+        let (x, y) = (i32::from(e.column), i32::from(e.row));
         // An open overlay owns the screen: the canvas behind it does not drift, and
         // the wheel belongs to whatever list the overlay is showing.
         if self.dialog.is_some() {
@@ -139,19 +148,19 @@ impl App {
     }
 
     fn refresh_hover(&mut self, x: i32, y: i32) {
-        self.hover = Some((x, y));
+        self.pointer.at = Some((x, y));
         self.hover_switch_menu(x, y);
         let cell = self.viewport.to_canvas(x, y);
         if self.placing.is_some() && !self.over_chrome(x, y) {
             self.show_placing(cell);
         }
-        self.hover_is_target = self.tool() == ToolId::Select
+        self.pointer.on_target = self.tool() == ToolId::Select
             && !self.over_chrome(x, y)
             && self.editor.hover_is_target(cell, Mods::NONE);
     }
 
-    fn on_move(&mut self, e: &MouseEvent) {
-        let (x, y) = (e.column as i32, e.row as i32);
+    fn on_move(&mut self, e: MouseEvent) {
+        let (x, y) = (i32::from(e.column), i32::from(e.row));
         let mods = self.mouse_mods(e);
         match self.mode {
             Mode::Pan { sx, sy, origin } => {
@@ -170,9 +179,9 @@ impl App {
         self.refresh_hover(x, y);
     }
 
-    fn on_down(&mut self, e: &MouseEvent, button: MouseButton) {
-        let (x, y) = (e.column as i32, e.row as i32);
-        self.hover = Some((x, y));
+    fn on_down(&mut self, e: MouseEvent, button: MouseButton) {
+        let (x, y) = (i32::from(e.column), i32::from(e.row));
+        self.pointer.at = Some((x, y));
         let action = hotspot_at(&self.hotspots, x, y);
         self.pressed = action.map(|a| (a, x, y));
         if action.is_some() || self.dialog.is_some() {
@@ -270,42 +279,7 @@ impl App {
             return;
         }
 
-        // Global shortcuts.
-        if is_ctrl(k, 'z') {
-            if is_shift(k) {
-                self.redo();
-            } else {
-                self.undo();
-            }
-            return;
-        }
-        if is_ctrl(k, 'y') {
-            self.redo();
-            return;
-        }
-        if is_ctrl(k, 's') {
-            self.editor.flush();
-            self.save();
-            self.toast("saved");
-            return;
-        }
-        if is_ctrl(k, 'e') {
-            let anchor = menu_anchor(PanelId::FileMenu, self.width);
-            self.toggle_panel(PanelId::Export, anchor);
-            return;
-        }
-        if is_ctrl(k, 'o') {
-            let anchor = menu_anchor(PanelId::FileMenu, self.width);
-            self.toggle_panel(PanelId::Files, anchor);
-            return;
-        }
-        if is_ctrl(k, 'x') {
-            return self.copy_selection(true);
-        }
-        if is_ctrl(k, 'v') {
-            if let Some(text) = self.clipboard.paste() {
-                self.paste_text(&text);
-            }
+        if self.global_chord(k) {
             return;
         }
         // An open overlay owns the keyboard, except for the ctrl chords above: a
@@ -328,6 +302,56 @@ impl App {
             return self.set_tool(TOOL_IDS[digit - 1]);
         }
 
+        self.canvas_key(k);
+    }
+
+    /// The ctrl chords. They work everywhere — over a dialog, a dropdown or a text
+    /// session — so nothing here may be reached only on the canvas path.
+    fn global_chord(&mut self, k: &KeyEvent) -> bool {
+        if is_ctrl(k, 'z') {
+            if is_shift(k) {
+                self.redo();
+            } else {
+                self.undo();
+            }
+            return true;
+        }
+        if is_ctrl(k, 'y') {
+            self.redo();
+            return true;
+        }
+        if is_ctrl(k, 's') {
+            self.editor.flush();
+            self.save();
+            self.toast("saved");
+            return true;
+        }
+        if is_ctrl(k, 'e') {
+            let anchor = menu_anchor(PanelId::FileMenu, self.width);
+            self.toggle_panel(PanelId::Export, anchor);
+            return true;
+        }
+        if is_ctrl(k, 'o') {
+            let anchor = menu_anchor(PanelId::FileMenu, self.width);
+            self.toggle_panel(PanelId::Files, anchor);
+            return true;
+        }
+        if is_ctrl(k, 'x') {
+            self.copy_selection(true);
+            return true;
+        }
+        if is_ctrl(k, 'v') {
+            if let Some(text) = self.clipboard.paste() {
+                self.paste_text(&text);
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Everything a key can mean on the canvas: the drag, the space bar's pan run,
+    /// text entry, the tool letters and the editing keys.
+    fn canvas_key(&mut self, k: &KeyEvent) {
         let key = tool_key(k);
 
         // Mid-drag: `f` flips line/arrow/select elbows; other keys go to the tool.
