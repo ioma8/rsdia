@@ -84,7 +84,8 @@ jobs:
           name="rsdia-$GITHUB_REF_NAME-${{ matrix.target }}"
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/rsdia${EXE}" README.md LICENSE dist/
-          tar -C dist -czf "$name.tar.gz" .
+          # Members named explicitly: no `./` entries in the archive.
+          tar -C dist -czf "$name.tar.gz" "rsdia${EXE}" README.md LICENSE
           ls -l "$name.tar.gz"
       - name: Package (windows)
         if: runner.os == 'Windows'
