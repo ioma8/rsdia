@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain
         run: rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy,rustfmt
       - run: rustup default "$RUST_VERSION"
@@ -60,7 +60,7 @@ jobs:
     env:
       EXE: ${{ startsWith(matrix.os, 'windows') && '.exe' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain
         shell: bash
         run: |
@@ -96,7 +96,7 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/rsdia.exe", README.md, LICENSE dist
           Compress-Archive -Path dist/* -DestinationPath "$name.zip"
           Get-Item "$name.zip" | Format-List Name, Length
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: rsdia-*
@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
