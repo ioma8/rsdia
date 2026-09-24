@@ -1,6 +1,6 @@
 [package]
 name = "rsdia"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "A terminal editor for ASCII diagrams: draw boxes, arrows, lines and text, and export them as plain text"
 license = "MIT"
