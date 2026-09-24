@@ -2,10 +2,10 @@
 name = "rsdia"
 version = "0.2.0"
 edition = "2021"
-description = "A Rust TUI/CLI diagramming tool: draw ASCII diagrams in your terminal and export them as text"
+description = "A terminal editor for ASCII diagrams: draw boxes, arrows, lines and text, and export them as plain text"
 license = "MIT"
-repository = "https://github.com/mpospirit/rsdia"
-homepage = "https://github.com/mpospirit/rsdia"
+repository = "https://github.com/ioma8/rsdia"
+homepage = "https://ioma8.github.io/rsdia/"
 keywords = ["ascii", "asciiflow", "diagram", "terminal", "tui"]
 categories = ["command-line-utilities"]
 
