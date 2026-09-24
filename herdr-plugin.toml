@@ -2,7 +2,7 @@ id = "mpospirit.rsdia"
 name = "rsdia"
 version = "0.2.0"
 min_herdr_version = "0.9.0"
-description = "Terminal ASCII editor for drawing quick diagrams and sketches"
+description = "A Rust TUI/CLI diagramming tool: draw ASCII diagrams in your terminal and export them as text"
 platforms = ["linux", "macos"]
 
 # rsdia is a single static binary; build it once at install time.

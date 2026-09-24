@@ -2,7 +2,7 @@
 name = "rsdia"
 version = "0.2.0"
 edition = "2021"
-description = "terminal ASCII editor for drawing quick diagrams and sketches"
+description = "A Rust TUI/CLI diagramming tool: draw ASCII diagrams in your terminal and export them as text"
 license = "MIT"
 repository = "https://github.com/mpospirit/rsdia"
 homepage = "https://github.com/mpospirit/rsdia"
