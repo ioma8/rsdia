@@ -246,6 +246,13 @@ pub struct Palette {
     pub tb_label: Color,
     pub tb_hover: Color,
     pub tb_hover_bg: Color,
+    pub menu_bg: Color,
+    pub menu_fg: Color,
+    pub menu_active_bg: Color,
+    pub menu_active_fg: Color,
+    /// The status bar wears the scheme's blue; its label colour is picked for contrast.
+    pub status_bg: Color,
+    pub status_fg: Color,
     pub text: Color,
     pub muted: Color,
     pub accent: Color,
@@ -294,6 +301,31 @@ fn rgb(hex: &str) -> Color {
     Color::Rgb(r as u8, g as u8, b as u8)
 }
 
+/// Black or white, whichever reads better on `bg`. The menu and status bars put
+/// text on a colour that is not the scheme's text/background pair, so the label
+/// cannot just inherit `fg` — schemes such as one-dark or catppuccin would give
+/// it well under 2:1. Falls back to `fallback` when the colour is not concrete.
+fn readable_on(bg: Color, fallback: Color) -> Color {
+    let Color::Rgb(r, g, b) = bg else {
+        return fallback;
+    };
+    let channel = |c: u8| {
+        let c = c as f64 / 255.0;
+        if c <= 0.03928 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let luminance = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    // White beats black as a background once the luminance passes 0.179.
+    if luminance < 0.179 {
+        Color::White
+    } else {
+        Color::Black
+    }
+}
+
 /// The eight colors a scheme is built from, resolved to owned hex strings so the
 /// static schemes and the terminal's reported palette share one shape.
 struct Resolved {
@@ -302,6 +334,7 @@ struct Resolved {
     red: String,
     green: String,
     yellow: String,
+    blue: String,
     magenta: String,
     cyan: String,
     orange: String,
@@ -315,6 +348,7 @@ impl From<ColorScheme> for Resolved {
             red: c.red.to_string(),
             green: c.green.to_string(),
             yellow: c.yellow.to_string(),
+            blue: c.blue.to_string(),
             magenta: c.magenta.to_string(),
             cyan: c.cyan.to_string(),
             orange: c.orange.to_string(),
@@ -341,6 +375,14 @@ fn tokens(name: ThemeName, c: &Resolved, inherit: bool) -> Palette {
         tb_label: dim(0.55),
         tb_hover: rgb(&c.fg),
         tb_hover_bg: dim(0.2),
+        // The menu and status bars are finalized in `palette()`, after the
+        // terminal overrides, so their labels can be picked for contrast.
+        menu_bg: owned(&c.bg),
+        menu_fg: rgb(&c.fg),
+        menu_active_bg: rgb(&c.fg),
+        menu_active_fg: rgb(&c.bg),
+        status_bg: rgb(&c.blue),
+        status_fg: rgb(&c.fg),
         text: rgb(&c.fg),
         muted: dim(0.55),
         accent: rgb(&c.cyan),
@@ -371,6 +413,7 @@ fn terminal_scheme(term: &TerminalColors) -> Resolved {
         red: at(1, f.red),
         green: at(2, f.green),
         yellow: at(3, f.yellow),
+        blue: at(4, f.blue),
         magenta: at(5, f.magenta),
         cyan: at(6, f.cyan),
         orange: at(9, f.orange),
@@ -390,7 +433,37 @@ pub fn palette(name: ThemeName, term: Option<&TerminalColors>) -> Palette {
             ThemeName::Scheme(s) => s.scheme(),
         })
     };
-    tokens(name, &scheme, inherit)
+    let mut palette = tokens(name, &scheme, inherit);
+    if inherit {
+        // The terminal reported a palette, so the chrome wears it: MS Edit's grey
+        // menu/toolbar strip with black labels. Without a report the chrome stays
+        // on the stand-in scheme, so it matches the canvas. `gutter` needs no
+        // override — it is derived from the reported background either way.
+        let at = |i: usize, fallback: &str| {
+            term.and_then(|t| t.ansi.get(i))
+                .and_then(Option::as_deref)
+                .map(rgb)
+                .unwrap_or_else(|| rgb(fallback))
+        };
+        palette.status_bg = at(4, "#0000aa");
+        palette.tb_bg = at(7, "#c0c0c0");
+        palette.tb_border = at(8, "#555555");
+        palette.tb_label = at(0, "#000000");
+        palette.tb_hover = at(15, "#ffffff");
+        palette.tb_hover_bg = at(4, "#0000aa");
+        palette.text = at(0, "#000000");
+        palette.muted = at(8, "#555555");
+        palette.disabled = at(8, "#555555");
+        palette.selection_bg = at(4, "#0000aa");
+    }
+    // Idiomatic menu-bar highlight: the selected entry inverts the strip, so the
+    // label is legible on any scheme without a second colour to keep in sync.
+    palette.menu_bg = palette.tb_bg;
+    palette.menu_fg = readable_on(palette.menu_bg, palette.fg);
+    palette.menu_active_bg = palette.menu_fg;
+    palette.menu_active_fg = palette.menu_bg;
+    palette.status_fg = readable_on(palette.status_bg, palette.fg);
+    palette
 }
 
 // ------------------------------------------------------------------ detection
@@ -416,11 +489,12 @@ fn unix_osc_query(timeout_ms: u64) -> Option<TerminalColors> {
     use std::os::fd::AsRawFd;
     use std::time::{Duration, Instant};
 
-    let mut query = String::from("\x1b]10;?\x07\x1b]11;?\x07\x1b]4;0;?");
-    for i in 1..16 {
-        query.push_str(&format!(";{i};?"));
-    }
-    query.push('\x07');
+    let query = concat!(
+        "\x1b]4;0;?;1;?;2;?;3;?;4;?;5;?;6;?;7;?\x07",
+        "\x1b]4;8;?;9;?;10;?;11;?;12;?;13;?;14;?;15;?\x07",
+        "\x1b]10;?\x07",
+        "\x1b]11;?\x07",
+    );
     let mut out = std::io::stdout();
     out.write_all(query.as_bytes()).ok()?;
     out.flush().ok()?;
@@ -455,7 +529,14 @@ fn unix_osc_query(timeout_ms: u64) -> Option<TerminalColors> {
         }
         buf.extend_from_slice(&chunk[..n as usize]);
     }
-    parse_osc_colors(&buf)
+    parse_osc_colors(&buf).filter(complete_terminal_palette)
+}
+
+fn complete_terminal_palette(colors: &TerminalColors) -> bool {
+    !colors.fg.is_empty()
+        && !colors.bg.is_empty()
+        && colors.ansi.len() == 16
+        && colors.ansi.iter().all(Option::is_some)
 }
 
 /// Extracts `OSC 10;`, `OSC 11;` and `OSC 4;<index>;` replies from raw terminal bytes.
@@ -534,6 +615,33 @@ mod tests {
         }
     }
 
+    /// WCAG relative contrast between two concrete colours.
+    fn contrast(a: Color, b: Color) -> f64 {
+        let lum = |c: Color| {
+            // The bars label themselves with the terminal's own black/white.
+            let c = match c {
+                Color::Black => Color::Rgb(0, 0, 0),
+                Color::White => Color::Rgb(255, 255, 255),
+                c => c,
+            };
+            let Color::Rgb(r, g, b) = c else {
+                panic!("not rgb: {c:?}")
+            };
+            let channel = |c: u8| {
+                let c = c as f64 / 255.0;
+                if c <= 0.03928 {
+                    c / 12.92
+                } else {
+                    ((c + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+        };
+        let (x, y) = (lum(a), lum(b));
+        let (lo, hi) = if x < y { (x, y) } else { (y, x) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
     fn term() -> TerminalColors {
         TerminalColors {
             fg: "#ffffff".to_string(),
@@ -579,7 +687,7 @@ mod tests {
         assert_eq!(hex(scheme.bg), "#282a36");
         let inherited = palette(ThemeName::Terminal, Some(&term()));
         assert_eq!(inherited.bg, Color::Reset);
-        assert_eq!(inherited.tb_bg, Color::Reset);
+        assert_eq!(inherited.tb_bg, Color::Rgb(192, 192, 192));
         assert_eq!(hex(inherited.fg), "#ffffff");
     }
 
@@ -599,6 +707,59 @@ mod tests {
     fn with_no_terminal_colors_the_terminal_theme_stands_in_with_a_scheme() {
         let p = palette(ThemeName::Terminal, None);
         assert_eq!(hex(p.bg), FALLBACK_SCHEME.scheme().bg);
+    }
+
+    #[test]
+    fn terminal_chrome_uses_the_reported_ansi_palette() {
+        let p = palette(ThemeName::Terminal, Some(&term()));
+        assert_eq!(p.menu_bg, Color::Rgb(192, 192, 192));
+        assert_eq!(p.menu_fg, Color::Black);
+        assert_eq!(p.menu_active_bg, Color::Black);
+        assert_eq!(p.menu_active_fg, Color::Rgb(192, 192, 192));
+        assert_eq!(p.status_bg, Color::Rgb(0, 0, 255));
+        assert_eq!(p.status_fg, Color::White);
+        assert_eq!(p.selection_bg, Color::Rgb(0, 0, 255));
+    }
+
+    /// Without a report the chrome must stay on the stand-in scheme. Freezing the
+    /// MS Edit greys here would leave a Nord canvas wearing grey chrome.
+    #[test]
+    fn an_unreported_terminal_keeps_one_scheme_for_canvas_and_chrome() {
+        let nord = FALLBACK_SCHEME.scheme();
+        let p = palette(ThemeName::Terminal, None);
+        assert_eq!(p.bg, Color::Rgb(0x2e, 0x34, 0x40));
+        assert_eq!(p.tb_bg, p.bg);
+        assert_eq!(hex(p.menu_bg), nord.bg);
+        assert_ne!(p.menu_bg, Color::Rgb(192, 192, 192));
+    }
+
+    /// Every theme must clear 4.5:1 on both bars. `blue` was a dead scheme field
+    /// before this, so its hexes were never chosen to hold text.
+    #[test]
+    fn both_bars_stay_legible_on_every_theme() {
+        let themes = THEME_CHOICES
+            .iter()
+            .map(|t| (*t, palette(*t, Some(&term()))));
+        for (theme, p) in themes {
+            for (what, fg, bg) in [
+                ("menu", p.menu_fg, p.menu_bg),
+                ("status", p.status_fg, p.status_bg),
+                ("menu active", p.menu_active_fg, p.menu_active_bg),
+            ] {
+                let ratio = contrast(fg, bg);
+                assert!(ratio >= 4.5, "{theme:?} {what}: only {ratio:.2}:1");
+            }
+        }
+    }
+
+    #[test]
+    fn partial_terminal_palette_keeps_the_fallback() {
+        let mut colors = term();
+        assert!(!complete_terminal_palette(&colors));
+        colors.ansi.resize(16, Some("#000000".into()));
+        assert!(complete_terminal_palette(&colors));
+        colors.ansi[15] = None;
+        assert!(!complete_terminal_palette(&colors));
     }
 
     #[test]

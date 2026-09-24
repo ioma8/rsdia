@@ -7,9 +7,12 @@ use crate::core::grid::bounding_box;
 use crate::core::layer::is_erase;
 use crate::core::vector::Pos;
 use crate::storage::config::GridStyle;
-use crate::tui::painter::Painter;
+use crate::tui::painter::{Painter, Rect};
 
-/// Canvas cell shown at screen (0, 0).
+/// Width of the line-number gutter, including its separator column.
+const GUTTER_WIDTH: i32 = 5;
+
+/// Canvas coordinates map to screen coordinates after the line-number gutter.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Viewport {
     pub origin: Pos,
@@ -17,23 +20,24 @@ pub struct Viewport {
 
 impl Viewport {
     pub fn to_canvas(self, sx: i32, sy: i32) -> Pos {
-        Pos::new(sx + self.origin.x, sy + self.origin.y)
+        Pos::new(sx - GUTTER_WIDTH + self.origin.x, sy + self.origin.y)
     }
 
     pub fn pan(&mut self, dx: i32, dy: i32) {
         self.origin = Pos::new(self.origin.x + dx, self.origin.y + dy);
     }
 
-    /// Centers the drawing; large drawings align to the top-left below the toolbar.
-    pub fn recenter(&mut self, editor: &Editor, width: i32, height: i32, top: i32) {
+    /// Centers the drawing inside `area`, the canvas strip between the menu bar and
+    /// the tool picker; a drawing too large for it aligns to the strip's top-left.
+    pub fn recenter(&mut self, editor: &Editor, area: Rect) {
         let keys: Vec<Pos> = editor.canvas.committed.positions().collect();
-        let avail_h = height - top - 1;
+        let (top, avail_w, avail_h) = (area.y, area.w - GUTTER_WIDTH, area.h);
         let Some(b) = bounding_box(keys) else {
             self.origin = Pos::new(-2, -top);
             return;
         };
-        let ox = if b.width() <= width - 4 {
-            b.left() - (width - b.width()) / 2
+        let ox = if b.width() <= avail_w - 4 {
+            b.left() - (avail_w - b.width()) / 2
         } else {
             b.left() - 2
         };
@@ -50,6 +54,7 @@ pub struct CanvasViewState<'a> {
     pub editor: &'a Editor,
     pub viewport: Viewport,
     pub grid: GridStyle,
+    pub top: i32,
     pub hover_cell: Option<Pos>,
     /// The cell under the pointer is something the select tool would grab.
     pub hover_is_target: bool,
@@ -67,10 +72,23 @@ pub fn render_canvas(p: &mut Painter, s: &CanvasViewState) {
         && !s.editor.drawing
         && s.hover_is_target;
 
-    for sy in 0..p.height {
+    for sy in s.top..p.height - 1 {
         let cy = sy + oy;
-        for sx in 0..p.width {
-            let cx = sx + ox;
+        // Document rows, like an editor gutter: panning scrolls the numbers.
+        // `DIM` keeps them secondary on whatever background the theme has, and the
+        // clip keeps a wide row number from eating the separator column.
+        p.text_clipped(
+            0,
+            sy,
+            &format!("{:>3}", cy + 1),
+            pal.fg,
+            pal.bg,
+            Modifier::DIM,
+            GUTTER_WIDTH - 1,
+        );
+        p.cell(GUTTER_WIDTH - 1, sy, "│", pal.fg, pal.bg, Modifier::DIM);
+        for sx in GUTTER_WIDTH..p.width {
+            let cx = sx - GUTTER_WIDTH + ox;
             let pos = Pos::new(cx, cy);
             let mut bg = pal.bg;
             let mut fg = pal.fg;
@@ -136,10 +154,17 @@ pub fn render_canvas(p: &mut Painter, s: &CanvasViewState) {
         if let Some(b) = bounding_box(canvas.scratch.positions().collect::<Vec<_>>()) {
             let label = format!("{}×{}", b.width(), b.height());
             let y = b.bottom() + 1 - oy;
-            let x = b.right() + 1 - ox;
+            let x = GUTTER_WIDTH + b.right() + 1 - ox;
             p.text(x, y, &label, pal.bg, pal.selection_bg);
         }
     }
+
+    p.chrome.push(Rect {
+        x: 0,
+        y: s.top,
+        w: GUTTER_WIDTH,
+        h: (p.height - s.top - 1).max(0),
+    });
 
     // Text cursor: reverse video.
     let cursor = if tool == crate::core::editor::ToolId::Text {
@@ -148,9 +173,9 @@ pub fn render_canvas(p: &mut Painter, s: &CanvasViewState) {
         None
     };
     if let (Some(cursor), true) = (cursor, s.cursor_on) {
-        let sx = cursor.x - ox;
+        let sx = GUTTER_WIDTH + cursor.x - ox;
         let sy = cursor.y - oy;
-        if sx >= 0 && sy >= 0 && sx < p.width && sy < p.height {
+        if sx >= GUTTER_WIDTH && sy >= s.top && sx < p.width && sy < p.height - 1 {
             let v = canvas
                 .glyph_at(cursor)
                 .map(|c| c.to_string())

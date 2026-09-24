@@ -38,6 +38,11 @@ rsdia export architecture --basic --comment hashes --fenced -o diagram.txt
 | `ctrl+o` `ctrl+e` `ctrl+s` | files / export / save |
 | `ctrl+c` `ctrl+q` | quit (saves first) |
 
+The `File / Edit / View / Help` menu bar carries everything else (drawings,
+export, settings, recenter, shortcuts): click it, or press `alt+f`/`e`/`v`/`h`
+and walk it with the arrows and `enter`. The tool picker floats near the bottom
+of the canvas.
+
 Drawings are `.rd.json` under `~/.local/share/rsdia`, settings under
 `~/.config/rsdia`, and they autosave. `tmux` needs `set -g mouse on`; on macOS
 use the bare digits instead of `Alt`+digit.

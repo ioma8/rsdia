@@ -37,20 +37,77 @@ impl App {
 
     fn on_scroll(&mut self, e: &MouseEvent, dx: i32, dy: i32) {
         let (x, y) = (e.column as i32, e.row as i32);
-        if self.dialog.is_some() {
-            return;
-        }
-        if self.panel.is_some() && self.over_chrome(x, y) {
+        // A modal-ish overlay owns the screen: the canvas behind it does not drift.
+        if self.dialog.is_some() || self.panel.is_some() {
             return;
         }
         self.viewport.pan(dx, dy);
         self.refresh_hover(x, y);
     }
 
+    /// With a dropdown open, sliding onto another menu label opens that one, the
+    /// gesture a menu bar is expected to have.
+    fn hover_switch_menu(&mut self, x: i32, y: i32) {
+        if !self.panel.is_some_and(is_menu) {
+            return;
+        }
+        if let Some(Action::Panel(panel)) = hotspot_at(&self.hotspots, x, y) {
+            if self.panel != Some(panel) {
+                let anchor = self.anchor_for(panel, x);
+                self.toggle_panel(panel, anchor);
+            }
+        }
+    }
+
+    /// Keyboard traversal of the menu bar. Returns true when the key was the
+    /// menu's: `alt+<mnemonic>` opens a dropdown from anywhere, then arrows walk
+    /// the bar and its items, and enter runs the highlighted one.
+    fn menu_key(&mut self, k: &KeyEvent) -> bool {
+        if is_alt(k) {
+            if let KeyCode::Char(c) = k.code {
+                if let Some(panel) = menu_for_mnemonic(c) {
+                    self.open_menu(panel);
+                    return true;
+                }
+            }
+        }
+        let Some(panel) = self.panel.filter(|p| is_menu(*p)) else {
+            return false;
+        };
+        match k.code {
+            KeyCode::Esc => {
+                self.close_panel();
+                true
+            }
+            KeyCode::Left => {
+                self.step_menu(panel, -1);
+                true
+            }
+            KeyCode::Right => {
+                self.step_menu(panel, 1);
+                true
+            }
+            KeyCode::Up => {
+                self.move_menu_cursor(-1);
+                true
+            }
+            KeyCode::Down => {
+                self.move_menu_cursor(1);
+                true
+            }
+            KeyCode::Enter => {
+                self.run_menu_entry();
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn refresh_hover(&mut self, x: i32, y: i32) {
         self.hover = Some((x, y));
+        self.hover_switch_menu(x, y);
         let cell = self.viewport.to_canvas(x, y);
-        if self.placing.is_some() {
+        if self.placing.is_some() && !self.over_chrome(x, y) {
             self.show_placing(cell);
         }
         self.hover_is_target = self.tool() == ToolId::Select
@@ -173,6 +230,11 @@ impl App {
             return self.dialog_key(k);
         }
 
+        // The menu bar owns its keys before anything reaches the canvas.
+        if self.menu_key(k) {
+            return;
+        }
+
         // Global shortcuts.
         if is_ctrl(k, 'z') {
             if is_shift(k) {
@@ -193,12 +255,12 @@ impl App {
             return;
         }
         if is_ctrl(k, 'e') {
-            let anchor = self.anchor_of(ItemId::Export);
+            let anchor = menu_anchor(PanelId::FileMenu, self.width);
             self.toggle_panel(PanelId::Export, anchor);
             return;
         }
         if is_ctrl(k, 'o') {
-            let anchor = self.anchor_of(ItemId::Files);
+            let anchor = menu_anchor(PanelId::FileMenu, self.width);
             self.toggle_panel(PanelId::Files, anchor);
             return;
         }
@@ -209,6 +271,11 @@ impl App {
             if let Some(text) = self.clipboard.paste() {
                 self.paste_text(&text);
             }
+            return;
+        }
+        // A dropdown swallows everything except the ctrl chords above: plain keys,
+        // including the tool letters, must not reach the canvas behind it.
+        if self.panel.is_some_and(is_menu) {
             return;
         }
         if k.code == KeyCode::Esc {
@@ -286,7 +353,7 @@ impl App {
             return;
         }
         if ch == Some('?') {
-            let anchor = self.anchor_of(ItemId::Help);
+            let anchor = menu_anchor(PanelId::HelpMenu, self.width);
             return self.toggle_panel(PanelId::Help, anchor);
         }
 

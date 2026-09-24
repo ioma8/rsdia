@@ -27,13 +27,18 @@ use crate::storage::config::{save_config, Config, GridStyle};
 use crate::storage::drawings::{slugify, DrawingInfo, DrawingStore};
 use crate::tui::canvas_view::{render_canvas, CanvasViewState, Viewport};
 use crate::tui::host::{ConfirmKind, Dialog, Host, InputDialog, InputKind};
-use crate::tui::input::{alt_digit, ctrl_char, is_ctrl, is_shift, printable, tool_key};
+use crate::tui::input::{alt_digit, ctrl_char, is_alt, is_ctrl, is_shift, printable, tool_key};
 use crate::tui::painter::{hotspot_at, in_rect, Action, Hotspot, ItemId, Painter, PanelId, Rect};
 use crate::tui::popovers::{
-    render_dialog, render_export, render_files, render_help, render_menu, render_settings,
+    menu_entries, menu_entry_disabled, render_dialog, render_edit_menu, render_export,
+    render_file_menu, render_files, render_help, render_help_menu, render_settings,
+    render_view_menu,
 };
 use crate::tui::theme::{palette, Palette, TerminalColors, ThemeName};
-use crate::tui::toolbar::{layout_toolbar, render_toolbar};
+use crate::tui::toolbar::{
+    layout_toolbar, menu_anchor, menu_for_mnemonic, menu_panels, render_menubar, render_toolbar,
+    MENU_Y,
+};
 
 pub struct OpenDrawing {
     pub path: PathBuf,
@@ -76,13 +81,20 @@ fn tool_shortcut(c: char) -> Option<ToolId> {
     }
 }
 
+/// The four menu-bar dropdowns, as opposed to the tool panels they open.
+fn is_menu(panel: PanelId) -> bool {
+    matches!(
+        panel,
+        PanelId::FileMenu | PanelId::EditMenu | PanelId::ViewMenu | PanelId::HelpMenu
+    )
+}
+
 fn panel_for(id: ItemId) -> Option<PanelId> {
     match id {
         ItemId::Files => Some(PanelId::Files),
         ItemId::Export => Some(PanelId::Export),
         ItemId::Settings => Some(PanelId::Settings),
         ItemId::Help => Some(PanelId::Help),
-        ItemId::Menu => Some(PanelId::Menu),
         _ => None,
     }
 }
@@ -208,6 +220,8 @@ pub struct App {
     pub should_quit: bool,
 
     panel_anchor: i32,
+    /// Highlighted row of the open dropdown, for keyboard navigation.
+    menu_index: usize,
     dialog: Option<Dialog>,
     toast: Option<(String, Instant)>,
     chips_until: Instant,
@@ -265,6 +279,7 @@ impl App {
             hover_is_target: false,
             should_quit: false,
             panel_anchor: 0,
+            menu_index: 0,
             dialog: None,
             toast: None,
             chips_until: Instant::now(),
@@ -299,6 +314,14 @@ impl App {
 
     pub fn can_redo(&self) -> bool {
         self.editor.canvas.can_redo()
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.editor.has_selection()
+    }
+
+    pub fn menu_index(&self) -> usize {
+        self.menu_index
     }
 
     pub fn show_chips(&self) -> bool {
@@ -459,6 +482,14 @@ impl Host for App {
 
     fn can_redo(&self) -> bool {
         App::can_redo(self)
+    }
+
+    fn has_selection(&self) -> bool {
+        App::has_selection(self)
+    }
+
+    fn menu_index(&self) -> usize {
+        App::menu_index(self)
     }
 
     fn show_chips(&self) -> bool {

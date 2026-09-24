@@ -27,6 +27,11 @@ pub fn printable(k: &KeyEvent) -> Option<char> {
     }
 }
 
+/// Alt on its own, so a ctrl+alt chord is never read as a mnemonic.
+pub fn is_alt(k: &KeyEvent) -> bool {
+    k.modifiers.contains(KeyModifiers::ALT) && !k.modifiers.contains(KeyModifiers::CONTROL)
+}
+
 /// Tool key for a terminal key: a printable character or a named key.
 pub fn tool_key(k: &KeyEvent) -> Option<Key> {
     match k.code {
@@ -58,7 +63,7 @@ pub fn is_ctrl(k: &KeyEvent, c: char) -> bool {
 
 /// Alt+1..6 arrives as ESC+digit (meta) or as option on macOS with kitty keys.
 pub fn alt_digit(k: &KeyEvent) -> Option<usize> {
-    if !k.modifiers.contains(KeyModifiers::ALT) || k.modifiers.contains(KeyModifiers::CONTROL) {
+    if !is_alt(k) {
         return None;
     }
     match k.code {

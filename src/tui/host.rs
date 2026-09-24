@@ -24,6 +24,10 @@ pub trait Host {
     fn tool(&self) -> ToolId;
     fn can_undo(&self) -> bool;
     fn can_redo(&self) -> bool;
+    /// The select tool holds a live selection, so cut and copy are meaningful.
+    fn has_selection(&self) -> bool;
+    /// Row of the open dropdown that keyboard navigation has highlighted.
+    fn menu_index(&self) -> usize;
     fn show_chips(&self) -> bool;
 }
 

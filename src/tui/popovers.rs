@@ -7,18 +7,20 @@ use crate::core::editor::ToolId;
 use crate::core::export::{Charset, WRAPPERS};
 use crate::storage::config::GRID_STYLES;
 use crate::tui::host::{Dialog, Host};
-use crate::tui::painter::{Action, Btn, ItemId, Painter, Rect};
+use crate::tui::painter::{Action, Btn, ItemId, Painter, PanelId, Rect};
 use crate::tui::theme::{Palette, ThemeName, THEME_CHOICES};
 use crate::tui::toolbar::tool_color;
 
 // ------------------------------------------------------------------ common
 
-/// Places a popover below its toolbar label, clamped to the screen.
-pub fn place_popover(p: &Painter, anchor_x: i32, top: i32, w: i32, h: i32) -> Rect {
-    let w = w.min(p.width);
-    let h = h.min(3.max(p.height - top - 1));
-    let x = 0.max((anchor_x - 2).min(p.width - w));
-    Rect { x, y: top, w, h }
+/// Places a dropdown or panel under its anchor, clamped inside `area` — the strip
+/// between the menu bar and the floating tool picker. Panels therefore never
+/// overlap the picker, whatever their contents.
+pub fn place_popover(anchor_x: i32, area: Rect, w: i32, h: i32) -> Rect {
+    let w = w.min(area.w);
+    let h = h.clamp(1, area.h.max(1));
+    let x = area.x.max((anchor_x - 2).min(area.x + area.w - w));
+    Rect { x, y: area.y, w, h }
 }
 
 /// Horizontal rule inside a panel.
@@ -127,7 +129,7 @@ fn truncate_end(name: &str, width: i32) -> String {
 const FILES_WIDTH: i32 = 50;
 
 /// `files` popover: drawing list plus new / rename / fork / clear / delete / import.
-pub fn render_files(p: &mut Painter, host: &dyn Host, anchor_x: i32, top: i32) {
+pub fn render_files(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect) {
     let pal = p.pal;
     let actions = [
         FlowButton::new(Action::FilesNew, "[new]").fg(pal.accent),
@@ -140,10 +142,10 @@ pub fn render_files(p: &mut Painter, host: &dyn Host, anchor_x: i32, top: i32) {
     let labels: Vec<&str> = actions.iter().map(|a| a.label.as_str()).collect();
     let actions_rows = flow_height(FILES_WIDTH, &labels, "");
     let all = host.drawings();
-    let max_rows = (p.height - top - 6 - actions_rows).max(1) as usize;
+    let max_rows = (area.h - 6 - actions_rows).max(1) as usize;
     let rows = &all[..max_rows.min(all.len())];
     let h = 2 + 1.max(rows.len() as i32) + 1 + actions_rows;
-    let r = place_popover(p, anchor_x, top, FILES_WIDTH, h);
+    let r = place_popover(anchor_x, area, FILES_WIDTH, h);
     p.panel(r, pal.tb_border, pal.tb_bg);
 
     let mut y = r.y + 1;
@@ -187,7 +189,7 @@ pub fn render_files(p: &mut Painter, host: &dyn Host, anchor_x: i32, top: i32) {
 // ------------------------------------------------------------------ export
 
 /// `export` dialog: charset, comment wrapper, fence, preview, copy / save.
-pub fn render_export(p: &mut Painter, host: &dyn Host, anchor_x: i32, top: i32) {
+pub fn render_export(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect) {
     let pal = p.pal;
     let cfg = host.config().export;
     let preview: Vec<String> = host
@@ -200,10 +202,10 @@ pub fn render_export(p: &mut Painter, host: &dyn Host, anchor_x: i32, top: i32) 
     let wrap_labels: Vec<&str> = WRAPPERS.iter().map(|(_, _, label)| *label).collect();
     let wrap_rows = flow_height(w, &wrap_labels, "wrap:       ");
     let chrome = 2 + 1 + wrap_rows + 1 + 1 + 1 + 1;
-    let max_preview = (p.height - top - 1 - chrome).max(1) as usize;
+    let max_preview = (area.h - 1 - chrome).max(1) as usize;
     let shown = &preview[..max_preview.min(preview.len())];
     let h = chrome + shown.len() as i32;
-    let r = place_popover(p, anchor_x, top, w, h);
+    let r = place_popover(anchor_x, area, w, h);
     p.panel(r, pal.tb_border, pal.tb_bg);
 
     let charset = [
@@ -277,8 +279,8 @@ fn settings_height() -> i32 {
 }
 
 /// `settings` popover: grid style, theme, copy-on-select, recenter.
-pub fn render_settings(p: &mut Painter, host: &dyn Host, anchor_x: i32, top: i32) {
-    let r = place_popover(p, anchor_x, top, SETTINGS_WIDTH, settings_height());
+pub fn render_settings(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect) {
+    let r = place_popover(anchor_x, area, SETTINGS_WIDTH, settings_height());
     let pal = p.pal;
     p.panel(r, pal.tb_border, pal.tb_bg);
     let cfg = host.config().clone();
@@ -328,7 +330,7 @@ pub const TOOL_HELP: [(ToolId, &str); 6] = [
     (ToolId::Eraser, "drag to erase"),
 ];
 
-const SHORTCUTS: [(&str, &str); 11] = [
+const SHORTCUTS: [(&str, &str); 13] = [
     (
         "1-6 / alt+1-6",
         "switch tool (box select arrow line text eraser)",
@@ -345,15 +347,20 @@ const SHORTCUTS: [(&str, &str); 11] = [
     ("space+drag  middle-drag", "pan freely"),
     ("ctrl+o  ctrl+e  ctrl+s", "files / export / save now"),
     ("?  esc", "help / close popover, cancel, deselect"),
+    ("alt+f e v h", "open the File, Edit, View or Help menu"),
+    (
+        "arrows  enter",
+        "walk the menu bar and its items, enter runs one",
+    ),
     ("ctrl+c  ctrl+q", "quit (the drawing is saved first)"),
 ];
 
 /// `help` popover: active-tool help and the shortcut table.
-pub fn render_help(p: &mut Painter, host: &dyn Host, anchor_x: i32, top: i32) {
+pub fn render_help(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect) {
     let pal = p.pal;
-    let w = p.width.min(76);
+    let w = area.w.min(76);
     let h = 2 + 1 + 1 + SHORTCUTS.len() as i32 + 1;
-    let r = place_popover(p, anchor_x, top, w, h);
+    let r = place_popover(anchor_x, area, w, h);
     p.panel(r, pal.tb_border, pal.tb_bg);
     let tool = host.editor().tool();
     let mut y = r.y + 1;
@@ -405,31 +412,107 @@ pub fn render_help(p: &mut Painter, host: &dyn Host, anchor_x: i32, top: i32) {
     }
 }
 
-// ------------------------------------------------------------------ menu
+// ------------------------------------------------------------------ menus
 
-const MENU_ENTRIES: [(ItemId, &str); 7] = [
-    (ItemId::Files, "files"),
-    (ItemId::Export, "export"),
-    (ItemId::Undo, "undo"),
-    (ItemId::Redo, "redo"),
-    (ItemId::Settings, "settings"),
-    (ItemId::Help, "help"),
-    (ItemId::Quit, "quit"),
+const FILE_MENU: [(ItemId, &str, &str); 3] = [
+    (ItemId::Files, "Drawings…", "Ctrl+O"),
+    (ItemId::Export, "Export…", "Ctrl+E"),
+    (ItemId::Quit, "Quit", "Ctrl+Q"),
 ];
+const EDIT_MENU: [(ItemId, &str, &str); 5] = [
+    (ItemId::Undo, "Undo", "Ctrl+Z"),
+    (ItemId::Redo, "Redo", "Ctrl+Y"),
+    (ItemId::Cut, "Cut", "X"),
+    (ItemId::Copy, "Copy", "Y"),
+    (ItemId::Paste, "Paste", "P"),
+];
+const VIEW_MENU: [(ItemId, &str, &str); 2] = [
+    (ItemId::Settings, "Settings…", ""),
+    (ItemId::Recenter, "Recenter canvas", ""),
+];
+const HELP_MENU: [(ItemId, &str, &str); 1] = [(ItemId::Help, "Keyboard shortcuts", "?")];
 
-/// `≡` menu for terminals too narrow for the full toolbar.
-pub fn render_menu(p: &mut Painter, _host: &dyn Host, anchor_x: i32, top: i32) {
+/// The entries of a menu-bar dropdown, in display order. Keyboard navigation and
+/// the renderer read the same list, so they cannot drift apart.
+pub fn menu_entries(panel: PanelId) -> &'static [(ItemId, &'static str, &'static str)] {
+    match panel {
+        PanelId::FileMenu => &FILE_MENU,
+        PanelId::EditMenu => &EDIT_MENU,
+        PanelId::ViewMenu => &VIEW_MENU,
+        PanelId::HelpMenu => &HELP_MENU,
+        _ => &[],
+    }
+}
+
+/// Whether an entry has nothing to act on. Greying and keyboard navigation both
+/// use this, so a skipped row is always a greyed row.
+pub fn menu_entry_disabled(host: &dyn Host, id: ItemId) -> bool {
+    match id {
+        ItemId::Undo => !host.can_undo(),
+        ItemId::Redo => !host.can_redo(),
+        ItemId::Cut | ItemId::Copy => !host.has_selection(),
+        _ => false,
+    }
+}
+
+pub fn render_file_menu(p: &mut Painter, host: &dyn Host, x: i32, area: Rect) {
+    render_dropdown(p, host, x, area, &FILE_MENU);
+}
+
+pub fn render_edit_menu(p: &mut Painter, host: &dyn Host, x: i32, area: Rect) {
+    render_dropdown(p, host, x, area, &EDIT_MENU);
+}
+
+pub fn render_view_menu(p: &mut Painter, host: &dyn Host, x: i32, area: Rect) {
+    render_dropdown(p, host, x, area, &VIEW_MENU);
+}
+
+pub fn render_help_menu(p: &mut Painter, host: &dyn Host, x: i32, area: Rect) {
+    render_dropdown(p, host, x, area, &HELP_MENU);
+}
+
+fn render_dropdown(
+    p: &mut Painter,
+    host: &dyn Host,
+    anchor_x: i32,
+    area: Rect,
+    entries: &[(ItemId, &str, &str)],
+) {
     let pal = p.pal;
-    let r = place_popover(p, anchor_x, top, 18, MENU_ENTRIES.len() as i32 + 2);
+    let label_w = entries
+        .iter()
+        .map(|(_, label, _)| label.len())
+        .max()
+        .unwrap_or(0);
+    let key_w = entries
+        .iter()
+        .map(|(_, _, key)| key.len())
+        .max()
+        .unwrap_or(0);
+    let width = (label_w + key_w + 5) as i32;
+    let r = place_popover(anchor_x, area, width, entries.len() as i32 + 2);
     p.panel(r, pal.tb_border, pal.tb_bg);
-    for (i, (id, label)) in MENU_ENTRIES.iter().enumerate() {
+    // A narrow terminal clamps the panel, so the label gives way first: it is
+    // shortened with an ellipsis and the accelerator column is kept whole.
+    let inner = (r.w - 2).max(0) as usize;
+    let room = (inner as i32 - key_w as i32 - 3).max(1) as usize;
+    let cursor = host.menu_index();
+    for (i, (id, label, key)) in entries.iter().enumerate() {
         let fg = match id {
             ItemId::Undo => Some(pal.undo),
             ItemId::Redo => Some(pal.redo),
             ItemId::Quit => Some(pal.danger),
             _ => None,
         };
-        let text = format!(" {:<width$} ", label, width = (r.w - 4).max(0) as usize);
+        let disabled = menu_entry_disabled(host, *id);
+        let text: String = format!(
+            " {:<room$} {:>key_w$} ",
+            truncate_end(label, room as i32),
+            key
+        )
+        .chars()
+        .take(inner)
+        .collect();
         p.button(
             Action::MenuEntry(*id),
             r.x + 1,
@@ -437,6 +520,8 @@ pub fn render_menu(p: &mut Painter, _host: &dyn Host, anchor_x: i32, top: i32) {
             &text,
             Btn {
                 fg,
+                disabled,
+                selected: cursor == i,
                 ..Default::default()
             },
         );

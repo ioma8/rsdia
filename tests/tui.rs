@@ -13,8 +13,9 @@ use rsdia::core::vector::Pos;
 use rsdia::storage::config::DEFAULT_CONFIG;
 use rsdia::storage::drawings::DrawingStore;
 use rsdia::tui::app::{App, AppOptions, Clipboard, OpenDrawing};
+use rsdia::tui::painter::PanelId;
 use rsdia::tui::theme::{palette, TerminalColors, ThemeName};
-use rsdia::tui::toolbar::BAR_Y;
+use rsdia::tui::toolbar::toolbar_row;
 
 struct Harness {
     app: App,
@@ -90,11 +91,42 @@ impl Harness {
         self.frame().join("\n")
     }
 
-    /// Screen position of a toolbar label.
+    /// Row the floating picker draws on for this screen.
+    fn picker_row(&self) -> i32 {
+        toolbar_row(self.buf.area().height as i32)
+    }
+
+    /// Screen position of a floating-toolbar label.
     fn label(&mut self, text: &str) -> (i32, i32) {
+        let y = (self.picker_row() + 1) as usize;
         let lines = self.frame();
-        let y = (BAR_Y + 1) as usize;
         (char_find(&lines[y], text).unwrap_or(0) as i32, y as i32)
+    }
+
+    fn open_menu(&mut self, label: &str) {
+        let lines = self.frame();
+        let x = char_find(&lines[0], label).expect("menu label") as i32;
+        self.click(x, 0);
+    }
+
+    fn click_menu_item(&mut self, menu: &str, label: &str) {
+        let panel = match menu {
+            "File" => PanelId::FileMenu,
+            "Edit" => PanelId::EditMenu,
+            "View" => PanelId::ViewMenu,
+            "Help" => PanelId::HelpMenu,
+            _ => panic!("unknown menu {menu}"),
+        };
+        if self.app.panel != Some(panel) {
+            self.open_menu(menu);
+        }
+        let lines = self.frame();
+        let y = lines
+            .iter()
+            .position(|line| line.contains(label))
+            .expect(label);
+        let x = char_find(&lines[y], label).expect(label) as i32;
+        self.click(x, y as i32);
     }
 
     fn mouse(&mut self, kind: MouseEventKind, x: i32, y: i32, modifiers: KeyModifiers) {
@@ -166,27 +198,340 @@ fn cell(line: &str, from: usize, to: usize) -> String {
     line.chars().skip(from).take(to - from).collect()
 }
 
-// ------------------------------------------------------------------ toolbar
-
 #[test]
-fn the_full_layout_is_79_cells_wide_in_asciiflows_order() {
+fn msedit_chrome_has_menus_line_numbers_and_blue_status() {
+    use ratatui::style::Color;
     let mut h = Harness::new(120, 40, Layer::new(), None);
-    let lines = h.frame();
-    assert!(lines[2].contains(
-        "│  ≡  │  box select arrow line text eraser  │  export  │  ⟲ ⟳  │  ⚙  │  help  │"
-    ));
-    let x0 = lines[1].chars().position(|c| c == '┌').expect("a corner");
-    let x1 = lines[1].chars().position(|c| c == '┐').expect("a corner");
-    assert_eq!(x1 - x0 + 1, 79);
-    assert_eq!(x0, ((120 - 79) / 2) as usize);
+    let frame = h.frame();
+    for label in ["File", "Edit", "View", "Help"] {
+        assert!(frame[0].contains(label), "{}", frame[0]);
+    }
+    assert!(frame[5].starts_with("  5 │"), "{}", frame[5]);
+    h.click(2, 5);
+    assert_eq!(h.committed_len(), 0, "the gutter is not canvas input");
+
+    // No terminal answered here, so the whole chrome must stay on the stand-in
+    // scheme: freezing the MS Edit greys would leave a dark canvas wearing them.
+    assert_eq!(
+        frame[0].char_indices().count(),
+        120,
+        "the bar spans the screen"
+    );
+    let status = h.buf.cell((10, 39)).expect("status cell").style();
+    assert_eq!(status.bg, Some(Color::Rgb(0x81, 0xa1, 0xc1)));
+    assert_eq!(status.fg, Some(Color::Black));
+    assert_eq!(
+        h.buf.cell((1, 0)).expect("menu strip").style().bg,
+        Some(Color::Rgb(0x2e, 0x34, 0x40)),
+        "the menu strip is the stand-in background, not a grey"
+    );
+
+    let edit_x = frame[0].find("Edit").expect("Edit menu") as i32;
+    h.click(edit_x, 0);
+    assert!(h.text_frame().contains("Undo"));
+    assert!(h.text_frame().contains("Paste"));
 }
 
 #[test]
-fn compact_and_narrow_layouts() {
-    let mut h = Harness::new(65, 40, Layer::new(), None);
-    assert!(h.frame()[2].contains("│ ≡ │ box sel arrow line text erase │ exp │ ⟲ ⟳ │ ⚙ │ ? │"));
-    let mut h = Harness::new(38, 40, Layer::new(), None);
-    assert!(h.frame()[2].contains("│ ≡ │ box sel arw lin txt ers │"));
+fn the_gutter_numbers_document_rows_so_panning_scrolls_them() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    let row_number = |h: &mut Harness| -> i32 {
+        h.frame()[5]
+            .chars()
+            .take(3)
+            .collect::<String>()
+            .trim()
+            .parse()
+            .expect("a number")
+    };
+    let before = row_number(&mut h);
+    h.app.viewport.pan(0, 4);
+    assert_eq!(row_number(&mut h), before + 4);
+}
+
+// ------------------------------------------------------------------ toolbar
+
+#[test]
+fn the_floating_toolbar_contains_only_tools_near_the_canvas_bottom() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    let top = h.picker_row();
+    let lines = h.frame();
+    let row = &lines[(top + 1) as usize];
+    for tool in ["box", "select", "arrow", "line", "text", "eraser"] {
+        assert!(row.contains(tool), "{row}");
+    }
+    for menu_action in ["export", "help", "⚙", "⟲", "≡"] {
+        assert!(
+            !row.contains(menu_action),
+            "duplicated {menu_action}: {row}"
+        );
+    }
+    assert!(lines[top as usize].contains("┌"));
+    assert!(lines[(top + 2) as usize].contains("┘"));
+    assert!(
+        lines[(top + 3) as usize].contains("rsdia"),
+        "the picker sits on the status bar"
+    );
+}
+
+#[test]
+fn compact_menus_and_tiny_toolbar_fit_narrow_terminals() {
+    let mut h = Harness::new(30, 40, Layer::new(), None);
+    let row = (toolbar_row(40) + 1) as usize;
+    assert!(h.frame()[row].contains("box sel arw lin txt ers"));
+
+    let mut h = Harness::new(18, 40, Layer::new(), None);
+    let frame = h.frame();
+    assert!(frame[row].contains("b s a l t e"));
+    // The mnemonic labels themselves, not the full ones clipped by the buffer.
+    for (mnemonic, x) in [('F', 2), ('E', 6), ('V', 10), ('H', 14)] {
+        assert_eq!(frame[0].chars().nth(x), Some(mnemonic), "{}", frame[0]);
+    }
+    assert!(!frame[0].contains("File"), "{}", frame[0]);
+}
+
+#[test]
+fn a_tall_panel_leaves_the_floating_toolbar_intact() {
+    let mut h = Harness::new(80, 24, Layer::new(), None);
+    for i in 0..25 {
+        h.app
+            .store
+            .create(&format!("drawing {i}"))
+            .expect("created");
+    }
+    h.click_menu_item("File", "Drawings");
+    assert!(h.text_frame().contains("[delete]"), "the panel is open");
+    let top = toolbar_row(24) as usize;
+    let lines = h.frame();
+    assert!(lines[top].starts_with(" 20 │"), "{}", lines[top]);
+    assert!(lines[top].contains('┌'), "torn: {}", lines[top]);
+    assert!(lines[top + 1].contains("box select arrow line text eraser"));
+    assert!(lines[top + 2].contains('┘'), "torn: {}", lines[top + 2]);
+    // ...and the picker is still clickable.
+    let (x, y) = h.label("line");
+    h.click(x, y);
+    assert_eq!(h.app.tool(), rsdia::core::editor::ToolId::Line);
+}
+
+#[test]
+fn a_narrow_dropdown_keeps_its_border() {
+    let mut h = Harness::new(18, 40, Layer::new(), None);
+    h.open_menu("H");
+    let lines = h.frame();
+    // The label is shortened, but the panel's own frame survives the clamp.
+    assert!(
+        lines[1].starts_with('┌') && lines[1].ends_with('┐'),
+        "{}",
+        lines[1]
+    );
+    assert!(
+        lines[2].starts_with('│') && lines[2].ends_with('│'),
+        "{}",
+        lines[2]
+    );
+    assert!(
+        lines[3].starts_with('└') && lines[3].ends_with('┘'),
+        "{}",
+        lines[3]
+    );
+    assert!(lines[2].contains("Keyboard"), "{}", lines[2]);
+}
+
+#[test]
+fn menu_entries_grey_out_and_do_nothing_without_a_subject() {
+    use ratatui::style::Color;
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    let disabled = palette(ThemeName::Terminal, None).disabled;
+
+    // Nothing drawn: cut and copy have no selection to work on.
+    h.open_menu("Edit");
+    let lines = h.frame();
+    let copy_row = lines.iter().position(|l| l.contains("Copy")).expect("Copy");
+    let copy_x = char_find(&lines[copy_row], "Copy").expect("Copy") as u16;
+    assert_eq!(
+        h.buf
+            .cell((copy_x, copy_row as u16))
+            .expect("cell")
+            .style()
+            .fg,
+        Some(disabled)
+    );
+    h.click(copy_x as i32, copy_row as i32);
+    assert!(
+        h.app.clipboard.text.is_none(),
+        "an inert entry does nothing"
+    );
+    assert_eq!(h.app.panel, Some(PanelId::EditMenu), "and stays open");
+
+    // With a selection behind it, Copy is live and copies.
+    h.escape();
+    h.drag(10, 10, 14, 12, MouseButton::Left);
+    h.press('2');
+    h.drag(8, 8, 16, 13, MouseButton::Left);
+    h.open_menu("Edit");
+    let lines = h.frame();
+    let copy_row = lines.iter().position(|l| l.contains("Copy")).expect("Copy");
+    let copy_x = char_find(&lines[copy_row], "Copy").expect("Copy") as u16;
+    assert_ne!(
+        h.buf
+            .cell((copy_x, copy_row as u16))
+            .expect("cell")
+            .style()
+            .fg,
+        Some(disabled)
+    );
+    h.click(copy_x as i32, copy_row as i32);
+    assert!(h
+        .app
+        .clipboard
+        .text
+        .as_deref()
+        .is_some_and(|t| t.contains('┌')));
+    assert_eq!(h.app.panel, None);
+
+    // The terminal theme falls back to the stand-in scheme, so the grey must be a
+    // concrete colour rather than `Reset`.
+    assert_ne!(disabled, Color::Reset);
+}
+
+#[test]
+fn a_dropdown_hangs_off_its_label_however_it_is_clicked() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    let label_x = char_find(&h.frame()[0], "File").expect("File") as i32;
+    let dropdown_x = |h: &mut Harness| {
+        h.frame()[1]
+            .chars()
+            .position(|c| c == '┌')
+            .expect("a panel")
+    };
+    h.click(label_x, 0);
+    let first = dropdown_x(&mut h);
+    h.escape();
+    h.click(label_x + 4, 0);
+    assert_eq!(
+        dropdown_x(&mut h),
+        first,
+        "the click position must not move it"
+    );
+}
+
+#[test]
+fn the_menu_bar_walks_with_alt_mnemonics_and_arrows() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    for (mnemonic, panel) in [
+        ('f', PanelId::FileMenu),
+        ('e', PanelId::EditMenu),
+        ('v', PanelId::ViewMenu),
+        ('h', PanelId::HelpMenu),
+    ] {
+        h.key(KeyCode::Char(mnemonic), KeyModifiers::ALT);
+        assert_eq!(h.app.panel, Some(panel), "alt+{mnemonic}");
+    }
+
+    // Left and right walk the bar and wrap around it.
+    h.key(KeyCode::Right, KeyModifiers::empty());
+    assert_eq!(h.app.panel, Some(PanelId::FileMenu));
+    h.key(KeyCode::Right, KeyModifiers::empty());
+    assert_eq!(h.app.panel, Some(PanelId::EditMenu));
+    h.key(KeyCode::Left, KeyModifiers::empty());
+    assert_eq!(h.app.panel, Some(PanelId::FileMenu));
+    h.key(KeyCode::Left, KeyModifiers::empty());
+    assert_eq!(h.app.panel, Some(PanelId::HelpMenu), "wraps to the end");
+
+    // Esc closes, and only then does esc reach the canvas again.
+    h.key(KeyCode::Esc, KeyModifiers::empty());
+    assert_eq!(h.app.panel, None);
+}
+
+#[test]
+fn enter_runs_the_highlighted_menu_entry() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    h.drag(10, 10, 14, 12, MouseButton::Left);
+    assert_eq!(h.committed_len(), 12);
+
+    // alt+e highlights Undo, and enter runs it.
+    h.key(KeyCode::Char('e'), KeyModifiers::ALT);
+    h.key(KeyCode::Enter, KeyModifiers::empty());
+    assert_eq!(h.committed_len(), 0, "undo ran");
+    assert_eq!(h.app.panel, None, "and the menu closed");
+
+    // Redo is the next row, and is still greyed out at this point.
+    h.key(KeyCode::Char('e'), KeyModifiers::ALT);
+    h.key(KeyCode::Down, KeyModifiers::empty());
+    h.key(KeyCode::Enter, KeyModifiers::empty());
+    assert_eq!(h.committed_len(), 12);
+}
+
+#[test]
+fn arrow_navigation_skips_disabled_entries_and_stops_at_the_ends() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    let p = palette(ThemeName::Terminal, None);
+    let highlighted = |h: &mut Harness, label: &str| {
+        let lines = h.frame();
+        let row = lines
+            .iter()
+            .position(|l| l.contains(label))
+            .expect("the row");
+        let x = char_find(&lines[row], label).expect("the label") as u16;
+        h.buf.cell((x, row as u16)).expect("cell").style().bg == Some(p.menu_active_bg)
+    };
+
+    h.drag(10, 10, 14, 12, MouseButton::Left);
+    h.key(KeyCode::Char('e'), KeyModifiers::ALT);
+    assert!(
+        highlighted(&mut h, "Undo"),
+        "the first row starts highlighted"
+    );
+    assert!(!highlighted(&mut h, "Redo"));
+    assert!(!highlighted(&mut h, "Cut"), "no selection to cut");
+
+    // Nothing is selectable between Undo and Paste, so down lands on Paste.
+    h.key(KeyCode::Down, KeyModifiers::empty());
+    assert!(highlighted(&mut h, "Paste"));
+    assert!(!highlighted(&mut h, "Undo"));
+
+    // Down at the end and up at the start stay put.
+    h.key(KeyCode::Down, KeyModifiers::empty());
+    assert!(highlighted(&mut h, "Paste"));
+    h.key(KeyCode::Up, KeyModifiers::empty());
+    h.key(KeyCode::Up, KeyModifiers::empty());
+    assert!(
+        highlighted(&mut h, "Undo"),
+        "up stops at the first enabled row"
+    );
+}
+
+#[test]
+fn an_open_menu_swallows_plain_keys_but_not_the_global_shortcuts() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    let tool = h.app.tool();
+    h.key(KeyCode::Char('f'), KeyModifiers::ALT);
+    assert_eq!(h.app.panel, Some(PanelId::FileMenu));
+
+    for c in ['b', 'r', '2', '?', 'x', 'p'] {
+        h.press(c);
+        assert_eq!(h.app.tool(), tool, "{c} must not reach the canvas");
+    }
+    assert_eq!(h.app.panel, Some(PanelId::FileMenu), "nor close the menu");
+    assert_eq!(h.committed_len(), 0);
+    assert!(h.app.clipboard.text.is_none());
+
+    // ctrl chords are global and still work while the menu is open.
+    h.key(KeyCode::Char('s'), KeyModifiers::CONTROL);
+    assert!(h.text_frame().contains("saved"));
+}
+
+#[test]
+fn hovering_another_menu_label_switches_the_open_dropdown() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    h.open_menu("File");
+    assert_eq!(h.app.panel, Some(PanelId::FileMenu));
+    assert!(h.text_frame().contains("Drawings"));
+    let x = char_find(&h.frame()[0], "View").expect("View") as i32;
+    h.mouse(MouseEventKind::Moved, x, 0, KeyModifiers::empty());
+    h.render();
+    assert_eq!(h.app.panel, Some(PanelId::ViewMenu));
+    assert!(h.text_frame().contains("Recenter canvas"));
 }
 
 #[test]
@@ -218,44 +563,41 @@ fn letter_shortcuts_switch_tools() {
 }
 
 #[test]
-fn there_is_no_title_above_the_bar_and_the_status_bar_names_the_product() {
+fn there_is_no_title_above_the_menu_and_the_status_bar_names_the_product() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
     let lines = h.frame();
-    assert!(!lines[(BAR_Y - 1) as usize].contains("rsdia"));
+    assert!(!lines[0].contains("rsdia"));
     assert!(lines[lines.len() - 1].contains("rsdia"));
 }
 
 #[test]
-fn popovers_open_under_their_labels_and_close_on_escape_or_an_outside_click() {
+fn top_menus_open_dropdowns_then_their_panels_close_normally() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
-    let (x, y) = h.label("⚙");
-    h.click(x, y);
+    h.open_menu("Edit");
+    let edit = h.text_frame();
+    assert!(edit.contains("Undo") && edit.contains("Ctrl+Z"));
+    assert!(edit.contains("┌"));
+    h.escape();
+    h.open_menu("Help");
+    assert!(h.text_frame().contains("Keyboard shortcuts"));
+    h.escape();
+
+    h.open_menu("View");
+    assert!(h.text_frame().contains("Settings"));
+    assert_eq!(h.app.panel, Some(PanelId::ViewMenu));
+    h.click_menu_item("View", "Settings");
     let frame = h.frame();
-    assert!(frame.iter().any(|l| l.contains("lattice")));
-    assert!(frame[5].contains("grid:"));
-    let rows: Vec<String> = frame[6..9]
-        .iter()
-        .map(|l| {
-            let chars: Vec<char> = l.chars().collect();
-            let first = chars.iter().position(|c| *c == '│').unwrap_or(0);
-            let last = chars
-                .iter()
-                .rposition(|c| *c == '│')
-                .unwrap_or(chars.len() - 1);
-            chars[first + 1..last].iter().collect()
-        })
-        .collect();
-    assert!(rows[0].contains("theme: terminal  dracula  nord  tokyo-night"));
-    assert!(rows.join(" ").contains("github-light"));
-    for row in &rows {
-        assert!(row.chars().count() <= 56, "{row}");
-    }
+    assert!(frame.iter().any(|line| line.contains("lattice")));
+    assert!(frame.iter().any(|line| line.contains("theme:")));
     h.escape();
     assert!(!h.text_frame().contains("lattice"));
-    h.click(x, y);
+
+    h.open_menu("File");
+    assert!(h.text_frame().contains("Drawings"));
+    h.click_menu_item("File", "Drawings");
+    assert!(h.text_frame().contains("[new]"));
     h.click(5, 30);
-    let frame = h.text_frame();
-    assert!(!frame.contains("lattice"));
+    assert_eq!(h.app.panel, None);
     assert_eq!(h.committed_len(), 0);
 }
 
@@ -298,18 +640,17 @@ fn a_box_drag_draws_and_undo_and_redo_buttons_work() {
     assert_eq!(cell(&lines[14], 10, 20), "└────────┘");
     assert_eq!(h.committed_len(), 26);
 
-    let (x, y) = h.label("⟲");
-    h.click(x, y);
+    h.click_menu_item("Edit", "Undo");
     assert_eq!(h.committed_len(), 0);
-    let (x, y) = h.label("⟳");
-    h.click(x, y);
+    h.click_menu_item("Edit", "Redo");
     assert_eq!(h.committed_len(), 26);
 }
 
 #[test]
 fn drags_starting_on_the_toolbar_are_ignored() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
-    h.drag(25, 2, 30, 20, MouseButton::Left);
+    let (x, y) = h.label("box");
+    h.drag(x, y, x + 5, 20, MouseButton::Left);
     assert_eq!(h.committed_len(), 0);
 }
 
@@ -360,6 +701,19 @@ fn the_wheel_pans_the_viewport() {
     assert_eq!(h.app.viewport.origin.y, origin.y + 1);
     h.mouse(MouseEventKind::ScrollRight, 50, 20, KeyModifiers::empty());
     assert_eq!(h.app.viewport.origin.x, origin.x + 2);
+
+    // ...but not while an overlay owns the screen, however the pointer sits.
+    h.key(KeyCode::Char('f'), KeyModifiers::ALT);
+    let origin = h.app.viewport.origin;
+    h.mouse(MouseEventKind::ScrollDown, 50, 20, KeyModifiers::empty());
+    assert_eq!(
+        h.app.viewport.origin.y, origin.y,
+        "a menu freezes the canvas"
+    );
+    h.escape();
+    h.key(KeyCode::Char('o'), KeyModifiers::CONTROL);
+    h.mouse(MouseEventKind::ScrollDown, 50, 20, KeyModifiers::empty());
+    assert_eq!(h.app.viewport.origin.y, origin.y, "so does a panel");
 }
 
 #[test]
@@ -486,8 +840,7 @@ fn autosave_writes_the_drawing() {
 fn a_new_drawing_via_the_dialog_and_a_switch_back_from_the_list() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
     h.drag(10, 10, 14, 12, MouseButton::Left);
-    let (x, y) = h.label("≡");
-    h.click(x, y);
+    h.click_menu_item("File", "Drawings");
     assert!(h.text_frame().contains("> test"));
 
     let lines = h.frame();
@@ -505,7 +858,7 @@ fn a_new_drawing_via_the_dialog_and_a_switch_back_from_the_list() {
     assert_eq!(h.app.drawing_name(), "second");
     assert_eq!(h.committed_len(), 0);
 
-    h.click(x, y);
+    h.click_menu_item("File", "Drawings");
     let lines = h.frame();
     let y_test = lines
         .iter()
@@ -579,14 +932,63 @@ fn the_grid_style_toggles_live() {
 }
 
 #[test]
-fn help_carries_no_attribution_line() {
+fn help_opens_from_the_menu_and_from_the_question_mark() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
-    let (x, y) = h.label("help");
-    h.click(x, y);
+    h.press('?');
+    assert_eq!(h.app.panel, Some(PanelId::Help));
     let frame = h.text_frame();
     assert!(frame.contains("switch tool"));
     assert!(!frame.to_lowercase().contains("asciiflow"));
     assert!(!frame.contains("github.com"));
+    h.escape();
+    assert_eq!(h.app.panel, None);
+
+    h.click_menu_item("Help", "Keyboard shortcuts");
+    assert_eq!(h.app.panel, Some(PanelId::Help));
+}
+
+#[test]
+fn recentering_centers_the_drawing_in_the_strip_above_the_picker() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    // An 11x27 box, deliberately drawn away from the middle.
+    h.drag(60, 4, 70, 30, MouseButton::Left);
+    h.app.recenter();
+    h.render();
+
+    let lines = h.frame();
+    let picker = toolbar_row(40) as usize;
+    // Column 5 onwards skips the gutter's own rule.
+    let drawn: Vec<usize> = (1..picker)
+        .filter(|r| lines[*r].chars().skip(5).any(|c| "┌└─│".contains(c)))
+        .collect();
+    let first = *drawn.first().expect("the box is on screen");
+    let last = *drawn.last().expect("the box is on screen");
+    assert_eq!(drawn.len(), 27, "all of the box is visible");
+    assert!(last < picker - 1, "and clear of the picker");
+    let (above, below) = (first - 1, picker - 1 - last);
+    assert!(
+        above.abs_diff(below) <= 1,
+        "centered in the strip, got {above} above and {below} below"
+    );
+}
+
+#[test]
+fn the_view_menu_recenters_a_panned_canvas() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    // The picker's own frame contains `┌`, so look only at the canvas rows.
+    let box_visible = |h: &mut Harness| {
+        let top = toolbar_row(40) as usize;
+        h.frame()[1..top].iter().any(|line| line.contains('┌'))
+    };
+    h.drag(10, 10, 20, 16, MouseButton::Left);
+    assert!(box_visible(&mut h));
+
+    h.app.viewport.pan(0, 40);
+    assert!(!box_visible(&mut h), "the box is off-screen");
+    h.click_menu_item("View", "Recenter canvas");
+    h.render();
+    assert!(box_visible(&mut h), "recenter brings it back");
+    assert_eq!(h.app.panel, None, "and the menu closed");
 }
 
 #[test]
@@ -633,8 +1035,7 @@ fn ctrl_c_quits_instead_of_copying_even_mid_edit() {
 #[test]
 fn the_copy_on_select_toggle_shows_and_flips() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
-    let (x, y) = h.label("⚙");
-    h.click(x, y);
+    h.click_menu_item("View", "Settings");
     let frame = h.text_frame();
     assert!(frame.contains("copy on select:"));
     assert!(frame.contains("copy on select: off"));
@@ -690,8 +1091,7 @@ fn deleting_a_drawing_asks_first_and_creates_a_fresh_one_afterwards() {
     let doomed = h.app.current_path().to_path_buf();
     assert!(doomed.exists());
 
-    let (x, y) = h.label("≡");
-    h.click(x, y);
+    h.click_menu_item("File", "Drawings");
     let lines = h.frame();
     let y_delete = lines
         .iter()

@@ -15,6 +15,7 @@ use crate::tui::theme::{Palette, ThemeName};
 /// action after the frame, so painting never borrows the app mutably.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    Panel(PanelId),
     Toolbar(ItemId),
     MenuEntry(ItemId),
     FilesOpen(usize),
@@ -48,6 +49,10 @@ pub enum ItemId {
     Settings,
     Help,
     Quit,
+    Copy,
+    Cut,
+    Paste,
+    Recenter,
     Tool(ToolId),
 }
 
@@ -57,7 +62,10 @@ pub enum PanelId {
     Export,
     Settings,
     Help,
-    Menu,
+    FileMenu,
+    EditMenu,
+    ViewMenu,
+    HelpMenu,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,6 +116,9 @@ pub struct Btn {
     pub active: bool,
     pub active_color: Option<Color>,
     pub disabled: bool,
+    /// Highlighted by keyboard navigation: drawn as the inverse of the strip, the
+    /// way the selected menu-bar entry is.
+    pub selected: bool,
 }
 
 impl Btn {
@@ -237,12 +248,16 @@ impl<'a> Painter<'a> {
     /// Returns the x after the label.
     pub fn button(&mut self, action: Action, x: i32, y: i32, label: &str, b: Btn) -> i32 {
         let w = label.chars().count() as i32;
-        let bg = self.pal.tb_bg;
+        let mut bg = self.pal.tb_bg;
         let mut fg = b.fg.unwrap_or(self.pal.tb_label);
         let mut modifier = Modifier::empty();
-        let hovered = !b.disabled && self.is_hover(x, y, w, 1);
+        let hovered = !b.selected && !b.disabled && self.is_hover(x, y, w, 1);
         if b.disabled {
             fg = self.pal.disabled;
+        } else if b.selected {
+            fg = self.pal.menu_active_fg;
+            bg = self.pal.menu_active_bg;
+            modifier = Modifier::BOLD;
         } else if b.active {
             fg = b.active_color.unwrap_or(self.pal.text);
             modifier = Modifier::BOLD;
@@ -252,16 +267,9 @@ impl<'a> Painter<'a> {
                 Some(c) if !b.active => c,
                 _ => self.pal.tb_hover,
             };
+            bg = self.pal.tb_hover_bg;
         }
-        let end = self.text_clipped(
-            x,
-            y,
-            label,
-            fg,
-            if hovered { self.pal.tb_hover_bg } else { bg },
-            modifier,
-            self.width,
-        );
+        let end = self.text_clipped(x, y, label, fg, bg, modifier, self.width);
         if !b.disabled {
             self.hotspots.push(Hotspot {
                 action,

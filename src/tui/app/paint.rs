@@ -7,11 +7,19 @@ impl App {
         let area = buf.area();
         self.width = area.width as i32;
         self.height = area.height as i32;
-        let layout = layout_toolbar(self.width);
+        let layout = layout_toolbar(self.width, self.height);
+        // The canvas strip between the menu bar and the floating picker: the drawing
+        // is centred inside it and every overlay is confined to it, so neither the
+        // bar nor the picker can be covered by a drawing or a panel.
+        let strip = Rect {
+            x: 0,
+            y: MENU_Y + 1,
+            w: self.width,
+            h: (layout.y - MENU_Y - 1).max(1),
+        };
         if self.recenter_soon {
             self.recenter_soon = false;
-            self.viewport
-                .recenter(&self.editor, self.width, self.height, layout.bottom + 1);
+            self.viewport.recenter(&self.editor, strip);
         }
         let mut p = Painter::new(buf, self.pal, self.hover);
         let hover_cell = self.hover.map(|(x, y)| self.viewport.to_canvas(x, y));
@@ -21,23 +29,29 @@ impl App {
                 editor: &self.editor,
                 viewport: self.viewport,
                 grid: self.config.grid,
+                top: MENU_Y + 1,
                 hover_cell,
                 hover_is_target: self.hover_is_target,
                 cursor_on: true,
             },
         );
-        render_toolbar(&mut p, self, &layout);
+        render_menubar(&mut p, self);
+        // The picker is painted after the overlays, so whatever a panel contains
+        // cannot tear it.
         if let Some(panel) = self.panel {
             let anchor = self.panel_anchor;
-            let bottom = layout.bottom;
             match panel {
-                PanelId::Files => render_files(&mut p, self, anchor, bottom),
-                PanelId::Export => render_export(&mut p, self, anchor, bottom),
-                PanelId::Settings => render_settings(&mut p, self, anchor, bottom),
-                PanelId::Help => render_help(&mut p, self, anchor, bottom),
-                PanelId::Menu => render_menu(&mut p, self, anchor, bottom),
+                PanelId::Files => render_files(&mut p, self, anchor, strip),
+                PanelId::Export => render_export(&mut p, self, anchor, strip),
+                PanelId::Settings => render_settings(&mut p, self, anchor, strip),
+                PanelId::Help => render_help(&mut p, self, anchor, strip),
+                PanelId::FileMenu => render_file_menu(&mut p, self, anchor, strip),
+                PanelId::EditMenu => render_edit_menu(&mut p, self, anchor, strip),
+                PanelId::ViewMenu => render_view_menu(&mut p, self, anchor, strip),
+                PanelId::HelpMenu => render_help_menu(&mut p, self, anchor, strip),
             }
         }
+        render_toolbar(&mut p, self, &layout);
         self.paint_status(&mut p);
         if let Some(dialog) = self.dialog.as_ref() {
             let before = p.hotspots.len();
@@ -62,7 +76,7 @@ impl App {
                 w: self.width,
                 h: 1,
             },
-            pal.bg,
+            pal.status_bg,
         );
         let mut hint = tool_hint(self.tool());
         if self.placing.is_some() {
@@ -91,12 +105,17 @@ impl App {
             if self.dirty { " •" } else { "" }
         );
         let rx = 0.max(self.width - right.chars().count() as i32 - 1);
-        let (text, fg) = match message {
-            Some(m) => (m, pal.warning),
-            None => (hint, pal.muted),
-        };
-        p.text_clipped(1, y, text, fg, pal.bg, Modifier::empty(), rx - 2);
-        p.text(rx, y, &right, pal.muted, pal.bg);
+        let text = message.unwrap_or(hint);
+        p.text_clipped(
+            1,
+            y,
+            text,
+            pal.status_fg,
+            pal.status_bg,
+            Modifier::empty(),
+            rx - 2,
+        );
+        p.text(rx, y, &right, pal.status_fg, pal.status_bg);
         p.chrome.push(Rect {
             x: 0,
             y,

@@ -18,13 +18,14 @@ impl App {
         self.chips_until = Instant::now() + Duration::from_millis(CHIP_MS);
     }
 
-    pub(crate) fn anchor_of(&self, id: ItemId) -> i32 {
-        layout_toolbar(self.width)
-            .items
-            .iter()
-            .find(|i| i.id == id)
-            .map(|i| i.x)
-            .unwrap_or(1)
+    /// A dropdown hangs off its menu label, wherever on the label it was clicked;
+    /// other panels come from a toolbar item and keep the clicked position.
+    pub(crate) fn anchor_for(&self, panel: PanelId, clicked_x: i32) -> i32 {
+        if is_menu(panel) {
+            menu_anchor(panel, self.width)
+        } else {
+            clicked_x
+        }
     }
 
     pub(crate) fn toggle_panel(&mut self, id: PanelId, anchor_x: i32) {
@@ -34,8 +35,62 @@ impl App {
         if id == PanelId::Files {
             self.drawings = self.store.list();
         }
+        if is_menu(id) {
+            self.menu_index = 0;
+        }
         self.panel = Some(id);
         self.panel_anchor = anchor_x;
+    }
+
+    /// Opens a dropdown by mnemonic; already open leaves its highlight alone.
+    pub(crate) fn open_menu(&mut self, panel: PanelId) {
+        if self.panel == Some(panel) {
+            return;
+        }
+        let anchor = self.anchor_for(panel, 0);
+        self.toggle_panel(panel, anchor);
+    }
+
+    /// Walks the menu bar to the next or previous dropdown, wrapping.
+    pub(crate) fn step_menu(&mut self, panel: PanelId, step: i32) {
+        let panels = menu_panels();
+        let Some(at) = panels.iter().position(|p| *p == panel) else {
+            return;
+        };
+        let next = (at as i32 + step).rem_euclid(panels.len() as i32) as usize;
+        self.open_menu(panels[next]);
+    }
+
+    /// Moves the highlight, skipping entries with nothing to act on and stopping
+    /// at the ends of the menu.
+    pub(crate) fn move_menu_cursor(&mut self, step: i32) {
+        let Some(panel) = self.panel.filter(|p| is_menu(*p)) else {
+            return;
+        };
+        let entries = menu_entries(panel);
+        let mut at = self.menu_index as i32 + step;
+        while at >= 0 && (at as usize) < entries.len() {
+            let (id, _, _) = entries[at as usize];
+            if !menu_entry_disabled(self, id) {
+                self.menu_index = at as usize;
+                return;
+            }
+            at += step;
+        }
+    }
+
+    /// Runs the highlighted dropdown entry through the same path a click takes.
+    pub(crate) fn run_menu_entry(&mut self) {
+        let Some(panel) = self.panel.filter(|p| is_menu(*p)) else {
+            return;
+        };
+        let Some((id, _, _)) = menu_entries(panel).get(self.menu_index).copied() else {
+            return;
+        };
+        if !menu_entry_disabled(self, id) {
+            let anchor = self.panel_anchor;
+            self.activate(Action::MenuEntry(id), anchor);
+        }
     }
 
     pub fn close_panel(&mut self) {
@@ -44,6 +99,10 @@ impl App {
 
     pub(crate) fn activate(&mut self, action: Action, x: i32) {
         match action {
+            Action::Panel(panel) => {
+                let anchor = self.anchor_for(panel, x);
+                self.toggle_panel(panel, anchor);
+            }
             Action::Toolbar(id) | Action::MenuEntry(id) => self.activate_item(id, x),
             Action::FilesOpen(i) => {
                 if let Some(path) = self.drawings.get(i).map(|d| d.path.clone()) {
@@ -85,8 +144,32 @@ impl App {
     fn activate_item(&mut self, id: ItemId, anchor_x: i32) {
         match id {
             ItemId::Quit => self.quit(),
-            ItemId::Undo => self.undo(),
-            ItemId::Redo => self.redo(),
+            ItemId::Undo => {
+                self.undo();
+                self.close_panel();
+            }
+            ItemId::Redo => {
+                self.redo();
+                self.close_panel();
+            }
+            ItemId::Copy => {
+                self.copy_selection(false);
+                self.close_panel();
+            }
+            ItemId::Cut => {
+                self.copy_selection(true);
+                self.close_panel();
+            }
+            ItemId::Recenter => {
+                self.recenter();
+                self.close_panel();
+            }
+            ItemId::Paste => {
+                if let Some(text) = self.clipboard.paste() {
+                    self.paste_text(&text);
+                }
+                self.close_panel();
+            }
             ItemId::Tool(tool) => {
                 self.set_tool(tool);
                 self.panel = None;
@@ -95,10 +178,12 @@ impl App {
                 let Some(panel) = panel_for(other) else {
                     return;
                 };
-                let anchor = if panel == PanelId::Menu {
-                    anchor_x
+                // A panel opened from an open dropdown stays under that dropdown;
+                // otherwise it lands on whatever was clicked.
+                let anchor = if self.panel.is_some_and(is_menu) {
+                    self.panel_anchor
                 } else {
-                    self.anchor_of(other)
+                    anchor_x
                 };
                 self.toggle_panel(panel, anchor);
             }
