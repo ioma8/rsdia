@@ -133,12 +133,12 @@ jobs:
           note="$(cat <<'EOF'
           ## Running the binaries
 
-          macOS quarantines a downloaded, unsigned binary and refuses the first launch
-          with *"cannot be opened because the developer cannot be verified"*. Clear the
-          flag once after unpacking:
+          macOS quarantines a downloaded, unsigned binary, so the first launch can be
+          refused with *"cannot be opened because the developer cannot be verified"*.
+          Clear the flag once after unpacking:
 
           ```sh
-          xattr -d com.apple.quarantine ./rsdia
+          xattr -d com.apple.quarantine ./rsdia   # "No such xattr" means it is already clear
           ```
 
           System Settings ▸ Privacy & Security ▸ "Open Anyway" does the same. Linux and
