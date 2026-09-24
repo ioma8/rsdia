@@ -124,12 +124,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # This job checks nothing out, so `gh` is told the repository explicitly.
+          repo="$GITHUB_REPOSITORY"
           tag="$GITHUB_REF_NAME"
-          if gh release view "$tag" >/dev/null 2>&1; then
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
             echo "::notice::release $tag already exists, uploading to it"
           else
-            gh release create "$tag" --draft --title "$tag" --generate-notes
+            gh release create "$tag" --repo "$repo" --draft --title "$tag" --generate-notes
           fi
-          gh release upload "$tag" dist/* --clobber
-          gh release view "$tag" --json tagName,isDraft,assets \
+          gh release upload "$tag" dist/* --clobber --repo "$repo"
+          gh release view "$tag" --repo "$repo" --json tagName,isDraft,assets \
             --jq '{tag: .tagName, draft: .isDraft, assets: [.assets[].name]}'
