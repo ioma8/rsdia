@@ -1,0 +1,135 @@
+name: release
+
+# Tag pushes only: `v0.2.0` runs the gates, builds every platform, and opens a draft
+# release with the binaries attached. Publishing the draft stays a human step.
+on:
+  push:
+    tags: ["v*"]
+
+# The release job creates the draft and uploads to it.
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned on purpose: `Cargo.toml` denies clippy's `nursery` group wholesale, so a
+  # newer toolchain could redden this workflow on a lint nobody chose.
+  RUST_VERSION: "1.97.1"
+
+jobs:
+  verify:
+    name: fmt, clippy, tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy,rustfmt
+      - run: rustup default "$RUST_VERSION"
+      - run: cargo fmt --check
+      # `-D warnings` covers rustc's own lints as well; the table in Cargo.toml
+      # already denies clippy all/pedantic/nursery.
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  build:
+    name: ${{ matrix.target }}
+    needs: verify
+    timeout-minutes: 30
+    strategy:
+      # One platform's bad day must not hide the other five, and the release waits
+      # for all of them either way.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          # 22.04 rather than 24.04 on purpose: the binary then needs glibc 2.35,
+          # which Debian 12 and Ubuntu 22.04 have, instead of 2.39.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    env:
+      EXE: ${{ startsWith(matrix.os, 'windows') && '.exe' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup target add --toolchain "$RUST_VERSION" "${{ matrix.target }}"
+      - name: Build
+        shell: bash
+        run: cargo +"$RUST_VERSION" build --release --locked --target "${{ matrix.target }}"
+      # Every leg runs on its own architecture, so the binary can be executed here.
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          "target/${{ matrix.target }}/release/rsdia${EXE}" --version
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="rsdia-$GITHUB_REF_NAME-${{ matrix.target }}"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/rsdia${EXE}" README.md LICENSE dist/
+          tar -C dist -czf "$name.tar.gz" .
+          ls -l "$name.tar.gz"
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "rsdia-$env:GITHUB_REF_NAME-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/rsdia.exe", README.md, LICENSE dist
+          Compress-Archive -Path dist/* -DestinationPath "$name.zip"
+          Get-Item "$name.zip" | Format-List Name, Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: rsdia-*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: draft release
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -l
+          sha256sum rsdia-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::notice::release $tag already exists, uploading to it"
+          else
+            gh release create "$tag" --draft --title "$tag" --generate-notes
+          fi
+          gh release upload "$tag" dist/* --clobber
+          gh release view "$tag" --json tagName,isDraft,assets \
+            --jq '{tag: .tagName, draft: .isDraft, assets: [.assets[].name]}'
