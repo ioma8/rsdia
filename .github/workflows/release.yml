@@ -128,10 +128,35 @@ jobs:
           # This job checks nothing out, so `gh` is told the repository explicitly.
           repo="$GITHUB_REPOSITORY"
           tag="$GITHUB_REF_NAME"
+          # Every draft release carries this: the archives are unsigned, and macOS
+          # will not run a quarantined download otherwise.
+          note="$(cat <<'EOF'
+          ## Running the binaries
+
+          macOS quarantines a downloaded, unsigned binary and refuses the first launch
+          with *"cannot be opened because the developer cannot be verified"*. Clear the
+          flag once after unpacking:
+
+          ```sh
+          xattr -d com.apple.quarantine ./rsdia
+          ```
+
+          System Settings ▸ Privacy & Security ▸ "Open Anyway" does the same. Linux and
+          Windows only need unpacking; `SHA256SUMS` covers all six archives.
+          EOF
+          )"
           if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
             echo "::notice::release $tag already exists, uploading to it"
+            # A draft from before this note existed still gets it, exactly once.
+            body="$(gh release view "$tag" --repo "$repo" --json body --jq .body)"
+            case "$body" in
+              *com.apple.quarantine*) echo "the existing notes already cover macOS" ;;
+              *) printf '%s\n\n%s\n' "$note" "$body" |
+                gh release edit "$tag" --repo "$repo" --notes-file - ;;
+            esac
           else
-            gh release create "$tag" --repo "$repo" --draft --title "$tag" --generate-notes
+            gh release create "$tag" --repo "$repo" --draft --title "$tag" \
+              --generate-notes --notes "$note"
           fi
           gh release upload "$tag" dist/* --clobber --repo "$repo"
           gh release view "$tag" --repo "$repo" --json tagName,isDraft,assets \
