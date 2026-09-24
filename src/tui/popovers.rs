@@ -338,14 +338,17 @@ const SHORTCUTS: [(&str, &str); 11] = [
         "ctrl+z  ctrl+y",
         "undo / redo (ctrl+shift+z with kitty keys)",
     ),
-    ("ctrl+c ctrl+x ctrl+v", "copy / cut / paste selection"),
+    (
+        "ctrl+shift+c  ctrl+x  ctrl+v",
+        "copy / cut / paste selection",
+    ),
     ("del  arrows", "erase / nudge selection"),
     ("f", "flip elbow while dragging a line or arrow"),
     ("scroll", "pan vertically, or horizontally with a trackpad"),
     ("space+drag  middle-drag", "pan freely"),
     ("ctrl+o  ctrl+e  ctrl+s", "files / export / save now"),
     ("?  esc", "help / close popover, cancel, deselect"),
-    ("ctrl+q twice", "quit (second press within 3s)"),
+    ("ctrl+c  ctrl+q", "quit (the drawing is saved first)"),
 ];
 
 /// `help` popover: active-tool help and the shortcut table.

@@ -414,7 +414,10 @@ fn select_copies_cuts_pastes_and_nudges() {
     h.drag(10, 10, 14, 12, MouseButton::Left);
     h.press('2');
     h.drag(8, 8, 16, 13, MouseButton::Left);
-    h.key(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    h.key(
+        KeyCode::Char('C'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    );
     assert!(h
         .app
         .clipboard
@@ -570,7 +573,7 @@ fn help_carries_no_attribution_line() {
 }
 
 #[test]
-fn notices_sit_where_the_quit_prompt_does_and_the_prompt_outranks_them() {
+fn notices_sit_where_the_hint_does() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
     h.key(KeyCode::Char('s'), KeyModifiers::CONTROL);
     let lines = h.frame();
@@ -582,22 +585,31 @@ fn notices_sit_where_the_quit_prompt_does_and_the_prompt_outranks_them() {
     assert!(row.chars().position(|c| c == 's').expect("saved") < 4);
     assert!(char_find(&row, "test").expect("the name") > row.chars().count() / 2);
     assert!(!row.contains("drag to draw a box"));
-
-    h.key(KeyCode::Char('q'), KeyModifiers::CONTROL);
-    let frame = h.text_frame();
-    assert!(frame.contains("press ctrl+q again to exit"));
-    assert!(!frame.contains("saved"));
 }
 
 #[test]
-fn bare_q_does_not_quit_and_ctrl_q_twice_does() {
+fn bare_q_does_not_quit_and_ctrl_q_does() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
     h.press('q');
     assert!(!h.app.should_quit);
     h.key(KeyCode::Char('q'), KeyModifiers::CONTROL);
-    assert!(!h.app.should_quit);
-    assert!(h.text_frame().contains("press ctrl+q again to exit"));
-    h.key(KeyCode::Char('q'), KeyModifiers::CONTROL);
+    assert!(h.app.should_quit);
+}
+
+#[test]
+fn ctrl_c_quits_instead_of_copying_even_mid_edit() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    h.press('t');
+    h.click(12, 12);
+    h.press('h');
+    h.key(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(h.app.should_quit);
+    assert_eq!(h.app.clipboard.text, None, "ctrl+c is not a copy");
+
+    // ...and a dialog does not eat it either.
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    h.app.new_drawing();
+    h.key(KeyCode::Char('c'), KeyModifiers::CONTROL);
     assert!(h.app.should_quit);
 }
 
@@ -716,17 +728,6 @@ fn the_save_export_prompt_writes_a_file() {
         std::fs::read_to_string(&out).expect("written"),
         "┌───┐\n│   │\n└───┘\n"
     );
-}
-
-#[test]
-fn the_quit_prompt_lapses_after_three_seconds() {
-    let mut h = Harness::new(120, 40, Layer::new(), None);
-    h.key(KeyCode::Char('q'), KeyModifiers::CONTROL);
-    std::thread::sleep(std::time::Duration::from_millis(3010));
-    assert!(!h.text_frame().contains("press ctrl+q again to exit"));
-    h.key(KeyCode::Char('q'), KeyModifiers::CONTROL);
-    assert!(!h.app.should_quit);
-    assert!(h.text_frame().contains("press ctrl+q again to exit"));
 }
 
 // ------------------------------------------------------------------ space to pan

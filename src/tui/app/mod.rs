@@ -43,7 +43,6 @@ pub struct OpenDrawing {
 
 const CHIP_MS: u64 = 1500;
 /// How long a first ctrl+q stays armed, waiting for the second one.
-const QUIT_CONFIRM_MS: u64 = 3000;
 const TOAST_MS: u64 = 2500;
 const SPACE_PAN_MS: u64 = 1000;
 
@@ -213,7 +212,6 @@ pub struct App {
     toast: Option<(String, Instant)>,
     chips_until: Instant,
     /// After this moment a ctrl+c quits; a first ctrl+c arms it.
-    quit_armed: Option<Instant>,
     /// The last text sent to the clipboard, so re-selecting the same cells does not resend it.
     last_copy: Option<String>,
     pressed: Option<(Action, i32, i32)>,
@@ -270,7 +268,6 @@ impl App {
             dialog: None,
             toast: None,
             chips_until: Instant::now(),
-            quit_armed: None,
             last_copy: None,
             pressed: None,
             mode: Mode::None,
@@ -406,14 +403,6 @@ impl App {
     }
 
     /// First ctrl+q arms the prompt in the status bar; a second one within the window quits.
-    fn arm_quit(&mut self) {
-        let now = Instant::now();
-        if self.quit_armed.is_some_and(|until| now < until) {
-            return self.quit();
-        }
-        self.quit_armed = Some(now + Duration::from_millis(QUIT_CONFIRM_MS));
-    }
-
     pub fn quit(&mut self) {
         self.shutdown();
         self.should_quit = true;

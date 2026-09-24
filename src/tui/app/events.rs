@@ -163,17 +163,21 @@ impl App {
     }
 
     fn handle_key(&mut self, k: &KeyEvent) {
+        // Quitting works everywhere, dialogs and text sessions included. Copy has to
+        // move off ctrl+c for that, so it lives on the terminal's own copy chord and
+        // falls back to `copy on select` in the settings panel where the terminal
+        // cannot tell ctrl+shift+c apart from ctrl+c.
+        if is_ctrl(k, 'q') || (is_ctrl(k, 'c') && !is_shift(k)) {
+            return self.quit();
+        }
+        if is_ctrl(k, 'c') {
+            return self.copy_selection(false);
+        }
         if self.dialog.is_some() {
             return self.dialog_key(k);
         }
 
         // Global shortcuts.
-        if is_ctrl(k, 'q') {
-            return self.arm_quit();
-        }
-        if is_ctrl(k, 'c') {
-            return self.copy_selection(false);
-        }
         if is_ctrl(k, 'z') {
             if is_shift(k) {
                 self.redo();

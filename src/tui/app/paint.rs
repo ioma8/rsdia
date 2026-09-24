@@ -78,20 +78,13 @@ impl App {
                 "press f to flip"
             };
         }
-        // Every transient notice shares one slot: the hint's place, in the prompt's
-        // color. The quit prompt outranks a toast, since it is the one the next
-        // keystroke acts on.
+        // A transient notice takes the hint's place while it lasts.
         let now = Instant::now();
-        let toast = self
+        let message = self
             .toast
             .as_ref()
             .filter(|(_, until)| now < *until)
             .map(|(text, _)| text.as_str());
-        let message = if self.quit_armed.is_some_and(|until| now < until) {
-            Some("press ctrl+q again to exit")
-        } else {
-            toast
-        };
         let right = format!(
             "{}{}  ·  rsdia",
             self.drawing.name,

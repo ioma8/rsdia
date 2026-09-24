@@ -32,11 +32,11 @@ rsdia export architecture --basic --comment hashes --fenced -o diagram.txt
 | `box select arrow line text eraser` | tools: `1`–`6` or `r v a l t e` |
 | drag | draw; `f` flips a line or arrow elbow |
 | `ctrl+z` / `ctrl+y` | undo / redo |
-| `ctrl+c` `ctrl+x` `ctrl+v` | copy / cut / paste the selection |
+| `ctrl+shift+c` `ctrl+x` `ctrl+v` | copy / cut / paste the selection |
 | `del`, arrows | erase / nudge the selection |
 | wheel, middle-drag, space+drag | pan |
 | `ctrl+o` `ctrl+e` `ctrl+s` | files / export / save |
-| `?`, `esc`, `ctrl+q` twice | help, cancel, quit |
+| `ctrl+c` `ctrl+q` | quit (saves first) |
 
 Drawings are `.rd.json` under `~/.local/share/rsdia`, settings under
 `~/.config/rsdia`, and they autosave. `tmux` needs `set -g mouse on`; on macOS
