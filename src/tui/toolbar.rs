@@ -3,7 +3,8 @@
 use ratatui::style::Color;
 
 use crate::core::editor::{ToolId, TOOL_IDS};
-use crate::tui::painter::{in_rect, Action, Btn, ItemId, Painter, PanelId, Rect};
+use crate::tui::host::Host;
+use crate::tui::painter::{Action, Btn, ItemId, Painter, PanelId, Rect};
 use crate::tui::theme::Palette;
 
 const fn item(id: ItemId, label: &'static str) -> Item {
@@ -191,15 +192,6 @@ pub fn tool_color(pal: &Palette, id: ToolId) -> Color {
     }
 }
 
-/// What the toolbar needs from the app.
-pub trait ToolbarHost {
-    fn tool(&self) -> ToolId;
-    fn panel(&self) -> Option<PanelId>;
-    fn can_undo(&self) -> bool;
-    fn can_redo(&self) -> bool;
-    fn show_chips(&self) -> bool;
-}
-
 fn panel_for(id: ItemId) -> Option<PanelId> {
     match id {
         ItemId::Files => Some(PanelId::Files),
@@ -220,7 +212,7 @@ fn label_for(form: &Form, id: ItemId) -> &'static str {
         .unwrap_or("")
 }
 
-pub fn render_toolbar(p: &mut Painter, host: &dyn ToolbarHost, layout: &ToolbarLayout) {
+pub fn render_toolbar(p: &mut Painter, host: &dyn Host, layout: &ToolbarLayout) {
     let pal = p.pal;
     let form = FORMS
         .iter()
@@ -316,18 +308,4 @@ pub fn render_toolbar(p: &mut Painter, host: &dyn ToolbarHost, layout: &ToolbarL
             }
         }
     }
-}
-
-/// The toolbar area, for click routing.
-pub fn toolbar_contains(layout: &ToolbarLayout, x: i32, y: i32) -> bool {
-    in_rect(
-        Rect {
-            x: layout.x,
-            y: layout.y,
-            w: layout.w,
-            h: 3,
-        },
-        x,
-        y,
-    )
 }

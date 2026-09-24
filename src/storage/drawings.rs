@@ -64,7 +64,6 @@ pub struct DrawingFile {
     pub name: String,
     pub created_at: String,
     pub updated_at: String,
-    pub cells: Vec<(i32, i32, char)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,7 +162,7 @@ pub fn deserialize(text: &str) -> Result<(DrawingFile, Layer), String> {
         return Err("Unsupported drawing file".to_string());
     };
     let mut layer = Layer::new();
-    let mut file = DrawingFile {
+    let file = DrawingFile {
         name: value
             .get("name")
             .and_then(|v| v.as_str())
@@ -179,7 +178,6 @@ pub fn deserialize(text: &str) -> Result<(DrawingFile, Layer), String> {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string(),
-        cells: Vec::new(),
     };
     for cell in cells {
         let Some(items) = cell.as_array() else {
@@ -194,7 +192,6 @@ pub fn deserialize(text: &str) -> Result<(DrawingFile, Layer), String> {
         };
         let Some(ch) = v.chars().next() else { continue };
         layer.set(Pos::new(x as i32, y as i32), ch);
-        file.cells.push((x as i32, y as i32, ch));
     }
     Ok((file, layer))
 }
@@ -232,11 +229,11 @@ impl DrawingStore {
             }
             // Skip unreadable files rather than failing the whole list.
             if let Ok(text) = fs::read_to_string(&path) {
-                if let Ok((file, _)) = deserialize(&text) {
+                if let Ok((file, layer)) = deserialize(&text) {
                     out.push(DrawingInfo {
                         name: file.name,
                         path,
-                        size: file.cells.len(),
+                        size: layer.len(),
                         updated_at: file.updated_at,
                     });
                 }

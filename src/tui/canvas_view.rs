@@ -4,8 +4,7 @@ use ratatui::style::Modifier;
 
 use crate::core::editor::Editor;
 use crate::core::grid::bounding_box;
-use crate::core::layer::{is_erase, LayerView};
-use crate::core::tools::tool::HoverHint;
+use crate::core::layer::is_erase;
 use crate::core::vector::Pos;
 use crate::storage::config::GridStyle;
 use crate::tui::painter::Painter;
@@ -52,7 +51,8 @@ pub struct CanvasViewState<'a> {
     pub viewport: Viewport,
     pub grid: GridStyle,
     pub hover_cell: Option<Pos>,
-    pub hover_hint: HoverHint,
+    /// The cell under the pointer is something the select tool would grab.
+    pub hover_is_target: bool,
     /// Blink phase for the text cursor.
     pub cursor_on: bool,
 }
@@ -65,7 +65,7 @@ pub fn render_canvas(p: &mut Painter, s: &CanvasViewState) {
     let highlight_hover = s.hover_cell.is_some()
         && s.editor.tool() == crate::core::editor::ToolId::Select
         && !s.editor.drawing
-        && s.hover_hint != HoverHint::Default;
+        && s.hover_is_target;
 
     for sy in 0..p.height {
         let cy = sy + oy;
@@ -76,19 +76,17 @@ pub fn render_canvas(p: &mut Painter, s: &CanvasViewState) {
             let mut fg = pal.fg;
             let mut modifier = Modifier::empty();
             let mut ch: Option<char> = None;
-            let mut from_scratch = false;
 
+            // A scratch cell always takes the highlight, even when it only erases.
             if let Some(sv) = canvas.scratch.get(pos) {
                 bg = pal.highlight;
                 fg = pal.scratch;
-                from_scratch = true;
                 if !is_erase(sv) {
                     ch = Some(sv);
                 }
-            } else if let Some(v) = canvas.committed.get(pos) {
+            } else if let Some(v) = canvas.committed.glyph(pos) {
                 ch = Some(v);
             }
-            let _ = from_scratch;
 
             if let Some(b) = sel {
                 if b.contains(pos) {
@@ -154,8 +152,7 @@ pub fn render_canvas(p: &mut Painter, s: &CanvasViewState) {
         let sy = cursor.y - oy;
         if sx >= 0 && sy >= 0 && sx < p.width && sy < p.height {
             let v = canvas
-                .rendered()
-                .get(cursor)
+                .glyph_at(cursor)
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| " ".to_string());
             p.cell(sx, sy, &v, pal.fg, pal.bg, Modifier::REVERSED);

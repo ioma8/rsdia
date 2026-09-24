@@ -142,11 +142,6 @@ pub fn is_box_drawing(c: char) -> bool {
     line_mask(c).is_some() || arrow_mask(c).is_some()
 }
 
-/// Lines and junctions, without arrows.
-pub fn is_line(c: char) -> bool {
-    line_mask(c).is_some()
-}
-
 pub fn is_arrow(c: char) -> bool {
     arrow_mask(c).is_some()
 }
@@ -228,16 +223,6 @@ pub fn arrow_for(d: Direction) -> char {
     }
 }
 
-/// `(direction, glyph)` pairs, replacing the JS `ARROW_FOR` map.
-pub fn arrows() -> [(Direction, char); 4] {
-    [
-        (Direction::Left, UNICODE.arrow_left),
-        (Direction::Right, UNICODE.arrow_right),
-        (Direction::Up, UNICODE.arrow_up),
-        (Direction::Down, UNICODE.arrow_down),
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,7 +261,7 @@ mod tests {
     #[test]
     fn masks_round_trip_through_the_charset() {
         assert!(is_box_drawing(UNICODE.junction_all) && !is_box_drawing('a'));
-        assert!(is_arrow(UNICODE.arrow_left) && !is_line(UNICODE.arrow_left));
+        assert!(is_arrow(UNICODE.arrow_left) && !is_box_drawing('a'));
         assert_eq!(to_basic(UNICODE.corner_top_left), ASCII.corner_top_left);
         assert_eq!(to_basic('x'), 'x');
     }

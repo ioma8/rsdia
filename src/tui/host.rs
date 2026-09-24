@@ -5,11 +5,12 @@
 
 use std::path::Path;
 
-use crate::core::editor::Editor;
+use crate::core::editor::{Editor, ToolId};
 use crate::storage::config::Config;
 use crate::storage::drawings::DrawingInfo;
 use crate::tui::painter::PanelId;
 
+/// Everything the panels and the toolbar read. Popovers never mutate.
 pub trait Host {
     fn editor(&self) -> &Editor;
     fn config(&self) -> &Config;
@@ -18,6 +19,12 @@ pub trait Host {
     fn drawing_name(&self) -> &str;
     fn panel(&self) -> Option<PanelId>;
     fn export_preview(&self) -> String;
+
+    // The toolbar's share.
+    fn tool(&self) -> ToolId;
+    fn can_undo(&self) -> bool;
+    fn can_redo(&self) -> bool;
+    fn show_chips(&self) -> bool;
 }
 
 /// Which prompt an input dialog is asking for; the app owns the handler.

@@ -3,8 +3,6 @@
 //! Ported from ASCIIFlow (`client/draw/select.ts`), MIT © Lewis Hemens, plus
 //! rsdia's keyboard nudge, clipboard and paste.
 
-use indexmap::IndexMap;
-
 use crate::core::canvas::Canvas;
 use crate::core::entity::{
     cells_in_box, detect_line_tip, detect_word, find_box, move_box_with_attachments, move_cells,
@@ -12,15 +10,15 @@ use crate::core::entity::{
 };
 use crate::core::glyphs::is_box_drawing;
 use crate::core::grid::{bounding_box, Bounds};
-use crate::core::layer::{Layer, LayerView, StackedLayers, ERASE};
+use crate::core::layer::{Layer, ERASE};
 use crate::core::route::{arrow_head, connect_endpoints, line};
 use crate::core::snap::snap;
 use crate::core::text::{layer_to_text, text_to_layer};
 use crate::core::vector::Pos;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use super::moveline::MoveTool;
-use super::tool::{HoverHint, Key, Mods, Tool};
+use super::tool::{Key, Mods, Tool};
 
 struct LineReshape {
     cells: Vec<Pos>,
@@ -41,11 +39,11 @@ fn nudge(key: Key) -> Option<Pos> {
 }
 
 fn dedupe(cells: Vec<Pos>) -> Vec<Pos> {
-    let mut seen: IndexMap<Pos, ()> = IndexMap::new();
-    for c in cells {
-        seen.insert(c, ());
-    }
-    seen.into_keys().collect()
+    cells
+        .into_iter()
+        .collect::<BTreeSet<Pos>>()
+        .into_iter()
+        .collect()
 }
 
 #[derive(Default)]
@@ -182,11 +180,7 @@ impl SelectTool {
                 cells.set(*c, v);
             }
         }
-        Some(layer_to_text(
-            &StackedLayers::new(vec![&cells]),
-            Some(b),
-            false,
-        ))
+        Some(layer_to_text(&cells, Some(b), false))
     }
 
     /// Erases the selected content as one undo step.
@@ -216,7 +210,7 @@ impl SelectTool {
         let mut layer = pasted.clone();
         layer.set_from(&snap(&pasted, &canvas.committed, &HashSet::new()));
         canvas.commit(layer);
-        let cells: Vec<Pos> = pasted.keys();
+        let cells: Vec<Pos> = pasted.positions().collect();
         self.set_selection(canvas, cells, false);
     }
 }
@@ -236,7 +230,7 @@ impl Tool for SelectTool {
                 cells: trace.cells,
                 anchor: trace.anchor,
                 is_arrow: tip.arrow.is_some(),
-                horizontal_segment: tip.axis == crate::core::entity::Axis::Horizontal,
+                horizontal_segment: tip.horizontal,
                 moved: false,
             });
             return;
@@ -340,23 +334,17 @@ impl Tool for SelectTool {
         false
     }
 
-    fn hover_hint(&self, canvas: &Canvas, p: Pos, _m: Mods) -> HoverHint {
+    fn hover_is_target(&self, canvas: &Canvas, p: Pos, _m: Mods) -> bool {
         let committed = &canvas.committed;
         if !self.selected_cells.is_empty() && self.in_selection(canvas, p) {
-            return HoverHint::Move;
+            return true;
         }
-        if detect_line_tip(committed, p).is_some() {
-            return HoverHint::Crosshair;
-        }
-        if detect_word(committed, p).is_some() {
-            return HoverHint::Move;
+        if detect_line_tip(committed, p).is_some() || detect_word(committed, p).is_some() {
+            return true;
         }
         if committed.get(p).is_some_and(is_box_drawing) {
-            return MoveTool::default().hover_hint(canvas, p, Mods::NONE);
+            return MoveTool::default().hover_is_target(canvas, p, Mods::NONE);
         }
-        if find_box(committed, p).is_some() {
-            return HoverHint::Move;
-        }
-        HoverHint::Default
+        find_box(committed, p).is_some()
     }
 }

@@ -10,7 +10,7 @@ use crate::core::route::{arrow_head, connect_endpoints, infer_horizontal_first, 
 use crate::core::snap::snap;
 use crate::core::vector::Pos;
 
-use super::tool::{HoverHint, Key, Mods, Tool};
+use super::tool::{Key, Mods, Tool};
 
 /// Builds the scratch layer for a line/arrow drag.
 pub fn draw_line(committed: &Layer, start: Pos, end: Pos, is_arrow: bool, flip: bool) -> Layer {
@@ -99,7 +99,7 @@ impl Tool for LineTool {
         false
     }
 
-    fn hover_hint(&self, _canvas: &Canvas, _p: Pos, _m: Mods) -> HoverHint {
-        HoverHint::Crosshair
+    fn hover_is_target(&self, _canvas: &Canvas, _p: Pos, _m: Mods) -> bool {
+        true
     }
 }

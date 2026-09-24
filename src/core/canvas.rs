@@ -4,7 +4,8 @@
 //! which lives in `storage`.
 
 use super::grid::Bounds;
-use super::layer::{Layer, StackedLayers, ERASE};
+use super::layer::{Layer, ERASE};
+use super::vector::Pos;
 
 const MAX_UNDO: usize = 500;
 
@@ -54,9 +55,9 @@ impl Canvas {
         !self.redo_layers.is_empty()
     }
 
-    /// Committed overlaid with scratch.
-    pub fn rendered(&self) -> StackedLayers<'_> {
-        StackedLayers::new(vec![&self.committed, &self.scratch])
+    /// The glyph shown at `p`: scratch over committed, erase markers hidden.
+    pub fn glyph_at(&self, p: Pos) -> Option<char> {
+        self.scratch.glyph(p).or_else(|| self.committed.glyph(p))
     }
 
     fn notify(&mut self, committed: bool) {
@@ -162,7 +163,6 @@ impl Canvas {
 
 #[cfg(test)]
 mod tests {
-    use super::super::layer::LayerView;
     use super::super::text::{layer_to_text, text_to_layer};
     use super::super::vector::Pos;
     use super::*;
@@ -175,7 +175,7 @@ mod tests {
     fn commit_undo_redo() {
         let mut c = Canvas::new();
         c.set_scratch(Layer::from_entries([(v(0, 0), 'a')]));
-        assert_eq!(c.rendered().get(v(0, 0)), Some('a'));
+        assert_eq!(c.glyph_at(v(0, 0)), Some('a'));
         assert_eq!(c.committed.len(), 0);
         c.commit_scratch();
         c.commit(Layer::from_entries([(v(0, 0), 'b'), (v(1, 0), 'c')]));

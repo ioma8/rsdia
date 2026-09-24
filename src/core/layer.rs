@@ -1,6 +1,6 @@
 //! Sparse maps of cell -> glyph, and stacks of them.
 
-use indexmap::IndexMap;
+use std::collections::BTreeMap;
 
 use super::vector::Pos;
 
@@ -16,19 +16,13 @@ pub fn is_erase(c: char) -> bool {
     c == ERASE
 }
 
-/// Read-only view of cell glyphs. `None` means empty.
-pub trait LayerView {
-    fn get(&self, p: Pos) -> Option<char>;
-    fn keys(&self) -> Vec<Pos>;
-}
-
 /// Sparse map of cell -> glyph. A layer used as a diff may hold erase markers.
 ///
-/// Insertion order is preserved (`IndexMap`), because `snap` iterates the cells it
-/// was handed in the order the tool built them and its result depends on it.
+/// Cells read out row-major (`BTreeMap`), so `snap`'s normalisation pass sees the
+/// same order no matter which order a tool happened to build the layer in.
 #[derive(Clone, Debug, Default)]
 pub struct Layer {
-    map: IndexMap<Pos, char>,
+    map: BTreeMap<Pos, char>,
 }
 
 impl Layer {
@@ -49,6 +43,11 @@ impl Layer {
         self.map.get(&p).copied()
     }
 
+    /// The glyph a reader wants: `None` for an absent cell or an erase marker.
+    pub fn glyph(&self, p: Pos) -> Option<char> {
+        self.get(p).filter(|v| !is_erase(*v))
+    }
+
     pub fn has(&self, p: Pos) -> bool {
         self.map.contains_key(&p)
     }
@@ -58,7 +57,7 @@ impl Layer {
     }
 
     pub fn delete(&mut self, p: Pos) {
-        self.map.shift_remove(&p);
+        self.map.remove(&p);
     }
 
     pub fn len(&self) -> usize {
@@ -73,7 +72,7 @@ impl Layer {
         self.map.clear();
     }
 
-    /// Insertion-ordered cells, erase markers included.
+    /// Row-major cells, erase markers included.
     pub fn positions(&self) -> impl Iterator<Item = Pos> + '_ {
         self.map.keys().copied()
     }
@@ -97,7 +96,7 @@ impl Layer {
         for (k, v) in diff.entries() {
             let old = self.map.get(&k).copied();
             if is_erase(v) {
-                next.map.shift_remove(&k);
+                next.map.remove(&k);
             } else {
                 next.map.insert(k, v);
             }
@@ -106,48 +105,6 @@ impl Layer {
             }
         }
         (next, undo)
-    }
-}
-
-impl LayerView for Layer {
-    fn get(&self, p: Pos) -> Option<char> {
-        Layer::get(self, p)
-    }
-
-    fn keys(&self) -> Vec<Pos> {
-        self.map.keys().copied().collect()
-    }
-}
-
-/// Stack of layers, topmost last. Erase markers in upper layers hide lower cells.
-pub struct StackedLayers<'a> {
-    layers: Vec<&'a Layer>,
-}
-
-impl<'a> StackedLayers<'a> {
-    pub fn new(layers: Vec<&'a Layer>) -> Self {
-        Self { layers }
-    }
-}
-
-impl LayerView for StackedLayers<'_> {
-    fn get(&self, p: Pos) -> Option<char> {
-        for layer in self.layers.iter().rev() {
-            if let Some(v) = layer.get(p) {
-                return if is_erase(v) { None } else { Some(v) };
-            }
-        }
-        None
-    }
-
-    fn keys(&self) -> Vec<Pos> {
-        let mut keys: IndexMap<Pos, ()> = IndexMap::new();
-        for layer in &self.layers {
-            for p in layer.positions() {
-                keys.insert(p, ());
-            }
-        }
-        keys.into_keys().collect()
     }
 }
 
@@ -174,21 +131,24 @@ mod tests {
     }
 
     #[test]
-    fn stacking_hides_lower_cells() {
-        let lower = Layer::from_entries([(v(0, 0), 'a')]);
-        let upper = Layer::from_entries([(v(0, 0), ERASE), (v(1, 0), 'b')]);
-        let stacked = StackedLayers::new(vec![&lower, &upper]);
-        assert_eq!(stacked.get(v(0, 0)), None);
-        assert_eq!(stacked.get(v(1, 0)), Some('b'));
-        assert_eq!(stacked.keys().len(), 2);
+    fn glyph_hides_erase_markers() {
+        let layer = Layer::from_entries([(v(0, 0), 'a'), (v(1, 0), ERASE)]);
+        assert_eq!(layer.get(v(0, 0)), Some('a'));
+        assert_eq!(layer.glyph(v(0, 0)), Some('a'));
+        assert_eq!(layer.get(v(1, 0)), Some(ERASE));
+        assert_eq!(layer.glyph(v(1, 0)), None);
+        assert_eq!(layer.glyph(v(9, 9)), None);
     }
 
     #[test]
-    fn insertion_order_is_kept() {
+    fn cells_are_iterated_row_major() {
         let mut layer = Layer::new();
         for p in [v(5, 5), v(0, 0), v(2, 2)] {
             layer.set(p, 'x');
         }
-        assert_eq!(LayerView::keys(&layer), vec![v(5, 5), v(0, 0), v(2, 2)]);
+        assert_eq!(
+            layer.positions().collect::<Vec<_>>(),
+            vec![v(0, 0), v(2, 2), v(5, 5)]
+        );
     }
 }

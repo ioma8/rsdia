@@ -5,7 +5,7 @@
 use unicode_width::UnicodeWidthChar;
 
 use super::grid::{bounding_box, Bounds};
-use super::layer::{Layer, LayerView};
+use super::layer::Layer;
 use super::vector::Pos;
 
 fn is_control(c: char) -> bool {
@@ -25,11 +25,10 @@ pub fn is_placeable(c: char) -> bool {
 /// Renders the layer as text. Without `bounds`, uses the bounding box of all
 /// non-empty cells. Trailing spaces are kept when a box is given (ASCIIFlow
 /// behaviour); `trim_right` strips them per row.
-pub fn layer_to_text(layer: &dyn LayerView, bounds: Option<Bounds>, trim_right: bool) -> String {
+pub fn layer_to_text(layer: &Layer, bounds: Option<Bounds>, trim_right: bool) -> String {
     let cells: Vec<Pos> = layer
-        .keys()
-        .into_iter()
-        .filter(|k| layer.get(*k).is_some())
+        .positions()
+        .filter(|p| layer.get(*p).is_some())
         .collect();
     let bounds = match bounds.or_else(|| bounding_box(cells.iter().copied())) {
         Some(b) => b,

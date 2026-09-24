@@ -4,7 +4,7 @@
 //! Ported from ASCIIFlow (`client/draw/utils.ts`, `client/draw/line.ts`), MIT © Lewis Hemens.
 
 use super::glyphs::{connect_all, connectable, connects, disconnect_all, is_special, UNICODE};
-use super::layer::{Layer, LayerView};
+use super::layer::Layer;
 use super::vector::{Direction, Pos};
 
 pub fn line(start: Pos, end: Pos, horizontal_first: bool) -> Layer {
@@ -106,7 +106,7 @@ pub struct CellContext {
     pub right_down: bool,
 }
 
-pub fn cell_context(p: Pos, layer: &dyn LayerView) -> CellContext {
+pub fn cell_context(p: Pos, layer: &Layer) -> CellContext {
     let s = |v: Pos| layer.get(v).is_some_and(is_special);
     CellContext {
         left: s(p.left()),

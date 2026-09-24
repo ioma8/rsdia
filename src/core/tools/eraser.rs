@@ -8,7 +8,7 @@ use crate::core::layer::{Layer, ERASE};
 use crate::core::snap::snap;
 use crate::core::vector::Pos;
 
-use super::tool::{HoverHint, Key, Mods, Tool};
+use super::tool::{Key, Mods, Tool};
 
 #[derive(Default)]
 pub struct EraserTool {
@@ -50,7 +50,7 @@ impl Tool for EraserTool {
         false
     }
 
-    fn hover_hint(&self, _canvas: &Canvas, _p: Pos, _m: Mods) -> HoverHint {
-        HoverHint::Crosshair
+    fn hover_is_target(&self, _canvas: &Canvas, _p: Pos, _m: Mods) -> bool {
+        true
     }
 }

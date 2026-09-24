@@ -48,17 +48,6 @@ pub enum Key {
     Right,
 }
 
-/// Terminal stand-in for the CSS cursor.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HoverHint {
-    Default,
-    Crosshair,
-    Move,
-    ResizeH,
-    ResizeV,
-    Text,
-}
-
 /// Tools receive the canvas for each call; they never store a reference to it.
 pub trait Tool {
     fn start(&mut self, canvas: &mut super::super::canvas::Canvas, p: Pos, m: Mods);
@@ -68,5 +57,6 @@ pub trait Tool {
     fn cleanup(&mut self, canvas: &mut super::super::canvas::Canvas);
     /// Returns true when the key was consumed.
     fn handle_key(&mut self, canvas: &mut super::super::canvas::Canvas, key: Key, m: Mods) -> bool;
-    fn hover_hint(&self, canvas: &super::super::canvas::Canvas, p: Pos, m: Mods) -> HoverHint;
+    /// Whether the cell under the pointer is something this tool would grab.
+    fn hover_is_target(&self, canvas: &super::super::canvas::Canvas, p: Pos, m: Mods) -> bool;
 }

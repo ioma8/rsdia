@@ -130,7 +130,7 @@ fn the_whole_box_and_its_contents_move() {
 fn line_tips_are_detected_and_traced_back_to_the_first_bend() {
     let layer = from_text(&["───►"]);
     let tip = detect_line_tip(&layer, v(3, 0)).expect("a tip");
-    assert_eq!(tip.axis, rsdia::core::entity::Axis::Horizontal);
+    assert!(tip.horizontal);
     assert_eq!(tip.arrow, Some('►'));
     assert_eq!(detect_line_tip(&layer, v(1, 0)), None);
     let trace = trace_line_from_tip(&layer, tip.tip, tip.body_dir);

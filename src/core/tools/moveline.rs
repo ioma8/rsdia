@@ -7,7 +7,7 @@ use crate::core::glyphs::{connects, is_arrow, is_special, UNICODE};
 use crate::core::layer::Layer;
 use crate::core::vector::{Direction, Pos};
 
-use super::tool::{HoverHint, Key, Mods, Tool};
+use super::tool::{Key, Mods, Tool};
 
 struct AttachmentTrace {
     source: Pos,
@@ -15,14 +15,8 @@ struct AttachmentTrace {
     direction: Direction,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Orientation {
-    Horizontal,
-    Vertical,
-}
-
 struct LineTrace {
-    orientation: Orientation,
+    horizontal: bool,
     positions: Vec<Pos>,
     attachments: Vec<AttachmentTrace>,
 }
@@ -81,7 +75,7 @@ impl Tool for MoveTool {
             .unwrap_or(i32::MAX);
         let effective = Pos::new(p.x.max(min_x).min(max_x), p.y.max(min_y).min(max_y));
         let origin = trace.positions[0];
-        let move_direction = if trace.orientation == Orientation::Vertical {
+        let move_direction = if !trace.horizontal {
             if effective.x < origin.x {
                 Direction::Left
             } else {
@@ -148,17 +142,10 @@ impl Tool for MoveTool {
         false
     }
 
-    fn hover_hint(&self, canvas: &Canvas, p: Pos, _m: Mods) -> HoverHint {
-        let v = canvas.committed.get(p);
-        if v == Some(UNICODE.line_horizontal) {
-            HoverHint::ResizeV
-        } else if v == Some(UNICODE.line_vertical) {
-            HoverHint::ResizeH
-        } else if v.is_some_and(is_special) {
-            HoverHint::Move
-        } else {
-            HoverHint::Default
-        }
+    fn hover_is_target(&self, canvas: &Canvas, p: Pos, _m: Mods) -> bool {
+        canvas.committed.get(p).is_some_and(|v| {
+            v == UNICODE.line_horizontal || v == UNICODE.line_vertical || is_special(v)
+        })
     }
 }
 
@@ -218,11 +205,7 @@ fn trace_line(layer: &Layer, position: Pos) -> LineTrace {
     }
 
     LineTrace {
-        orientation: if horizontal {
-            Orientation::Horizontal
-        } else {
-            Orientation::Vertical
-        },
+        horizontal,
         positions,
         attachments,
     }

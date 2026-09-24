@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use super::glyphs::{arrows, connections, connects, is_arrow, is_box_drawing, UNICODE};
+use super::glyphs::{connections, connects, is_arrow, is_box_drawing, UNICODE};
 use super::grid::{bounding_box, Bounds};
 use super::layer::{is_erase, Layer, ERASE};
 use super::snap::snap;
@@ -39,15 +39,10 @@ pub fn detect_word(layer: &Layer, p: Pos) -> Option<Vec<Pos>> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Axis {
-    Horizontal,
-    Vertical,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LineTip {
     pub tip: Pos,
-    pub axis: Axis,
+    /// The line runs left-right rather than up-down.
+    pub horizontal: bool,
     /// Direction from the tip toward the rest of the line.
     pub body_dir: Direction,
     pub arrow: Option<char>,
@@ -56,21 +51,16 @@ pub struct LineTip {
 /// The free end of a line or arrow under `p`, if any.
 pub fn detect_line_tip(layer: &Layer, p: Pos) -> Option<LineTip> {
     let value = layer.get(p)?;
-    let axis = match value {
-        H => Axis::Horizontal,
-        V => Axis::Vertical,
-        c if is_arrow(c) => {
-            if c == UNICODE.arrow_left || c == UNICODE.arrow_right {
-                Axis::Horizontal
-            } else {
-                Axis::Vertical
-            }
-        }
+    let horizontal = match value {
+        H => true,
+        V => false,
+        c if is_arrow(c) => c == UNICODE.arrow_left || c == UNICODE.arrow_right,
         _ => return None,
     };
-    let dirs = match axis {
-        Axis::Horizontal => [Direction::Left, Direction::Right],
-        Axis::Vertical => [Direction::Up, Direction::Down],
+    let dirs = if horizontal {
+        [Direction::Left, Direction::Right]
+    } else {
+        [Direction::Up, Direction::Down]
     };
     let connected: Vec<Direction> = dirs
         .into_iter()
@@ -85,7 +75,7 @@ pub fn detect_line_tip(layer: &Layer, p: Pos) -> Option<LineTip> {
     }
     Some(LineTip {
         tip: p,
-        axis,
+        horizontal,
         body_dir: connected[0],
         arrow: is_arrow(value).then_some(value),
     })
@@ -462,7 +452,12 @@ fn draw_connector(layer: &mut Layer, from: Pos, to: Pos, out: Direction, far_val
         layer.set(bend, corner_for(out.opposite(), next));
     }
     if far_value.is_some_and(is_arrow) {
-        for (d, ch) in arrows() {
+        for (d, ch) in [
+            (Direction::Left, UNICODE.arrow_left),
+            (Direction::Right, UNICODE.arrow_right),
+            (Direction::Up, UNICODE.arrow_up),
+            (Direction::Down, UNICODE.arrow_down),
+        ] {
             if d.delta() == approach {
                 layer.set(to, ch);
             }

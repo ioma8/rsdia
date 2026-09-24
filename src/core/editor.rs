@@ -7,7 +7,7 @@ use super::tools::eraser::EraserTool;
 use super::tools::line_tool::LineTool;
 use super::tools::select::SelectTool;
 use super::tools::text_tool::TextTool;
-use super::tools::tool::{HoverHint, Key, Mods, Tool};
+use super::tools::tool::{Key, Mods, Tool};
 use super::vector::Pos;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -82,10 +82,6 @@ impl Editor {
 
     pub fn tool(&self) -> ToolId {
         self.tool_id
-    }
-
-    pub fn select(&self) -> &SelectTool {
-        &self.select_tool
     }
 
     pub fn text(&self) -> &TextTool {
@@ -207,14 +203,15 @@ impl Editor {
         tool.handle_key(canvas, key, m)
     }
 
-    pub fn hover_hint(&self, p: Pos, m: Mods) -> HoverHint {
+    /// Whether the cell under the pointer is something the active tool would grab.
+    pub fn hover_is_target(&self, p: Pos, m: Mods) -> bool {
         match self.tool_id {
-            ToolId::Box => self.box_tool.hover_hint(&self.canvas, p, m),
-            ToolId::Select => self.select_tool.hover_hint(&self.canvas, p, m),
-            ToolId::Arrow => self.arrow_tool.hover_hint(&self.canvas, p, m),
-            ToolId::Line => self.line_tool.hover_hint(&self.canvas, p, m),
-            ToolId::Text => self.text_tool.hover_hint(&self.canvas, p, m),
-            ToolId::Eraser => self.eraser_tool.hover_hint(&self.canvas, p, m),
+            ToolId::Box => self.box_tool.hover_is_target(&self.canvas, p, m),
+            ToolId::Select => self.select_tool.hover_is_target(&self.canvas, p, m),
+            ToolId::Arrow => self.arrow_tool.hover_is_target(&self.canvas, p, m),
+            ToolId::Line => self.line_tool.hover_is_target(&self.canvas, p, m),
+            ToolId::Text => self.text_tool.hover_is_target(&self.canvas, p, m),
+            ToolId::Eraser => self.eraser_tool.hover_is_target(&self.canvas, p, m),
         }
     }
 

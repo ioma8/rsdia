@@ -3,7 +3,7 @@
 //! Wrapper semantics ported from ASCIIFlow (`client/export.tsx`), MIT © Lewis Hemens.
 
 use super::glyphs::to_basic;
-use super::layer::LayerView;
+use super::layer::Layer;
 use super::text::layer_to_text;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,10 +48,6 @@ fn wrapper_info(w: Wrapper) -> (Wrapper, &'static str, &'static str) {
 
 pub fn wrapper_id(w: Wrapper) -> &'static str {
     wrapper_info(w).1
-}
-
-pub fn wrapper_label(w: Wrapper) -> &'static str {
-    wrapper_info(w).2
 }
 
 pub fn is_wrapper(value: &str) -> Option<Wrapper> {
@@ -140,7 +136,7 @@ pub fn apply_export_config(text: &str, config: &ExportConfig) -> String {
 }
 
 /// Drawing text: bounding box of all non-empty cells, trailing spaces trimmed per row.
-pub fn export_text(layer: &dyn LayerView, config: &ExportConfig) -> String {
+pub fn export_text(layer: &Layer, config: &ExportConfig) -> String {
     apply_export_config(&layer_to_text(layer, None, true), config)
 }
 

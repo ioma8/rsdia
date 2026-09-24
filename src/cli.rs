@@ -126,56 +126,48 @@ fn open_or_create(store: &DrawingStore, arg: &str) -> OpenDrawing {
     }
 }
 
-/// `--flag value`, `--flag=value` and short aliases, without a parser dependency.
+/// Every flag both commands understand, with no parser dependency. Value-taking
+/// flags accept `--flag value` and `--flag=value`; anything else is a positional.
+#[derive(Default)]
 struct Args {
     positional: Vec<String>,
-    flags: Vec<(String, Option<String>)>,
+    basic: bool,
+    fenced: bool,
+    help: bool,
+    version: bool,
+    comment: Option<String>,
+    output: Option<String>,
+    import: Option<String>,
 }
 
 fn parse_args(args: &[String]) -> Args {
-    let mut out = Args {
-        positional: Vec::new(),
-        flags: Vec::new(),
-    };
-    let mut i = 0;
-    while i < args.len() {
-        let arg = &args[i];
-        if let Some(rest) = arg.strip_prefix("--") {
-            match rest.split_once('=') {
-                Some((name, value)) => out.flags.push((name.to_string(), Some(value.to_string()))),
-                None => {
-                    let takes_value = matches!(rest, "comment" | "output" | "import");
-                    if takes_value && i + 1 < args.len() {
-                        i += 1;
-                        out.flags.push((rest.to_string(), Some(args[i].clone())));
-                    } else {
-                        out.flags.push((rest.to_string(), None));
-                    }
-                }
-            }
-        } else if arg == "-o" && i + 1 < args.len() {
-            i += 1;
-            out.flags
-                .push(("output".to_string(), Some(args[i].clone())));
-        } else {
-            out.positional.push(arg.clone());
+    let mut out = Args::default();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        let (name, inline) = match arg.split_once('=') {
+            Some((name, value)) => (name, Some(value.to_string())),
+            None => (arg.as_str(), None),
+        };
+        let mut value = |slot: &mut Option<String>| {
+            *slot = Some(
+                inline
+                    .clone()
+                    .or_else(|| rest.next().cloned())
+                    .unwrap_or_default(),
+            );
+        };
+        match name {
+            "--basic" => out.basic = true,
+            "--fenced" => out.fenced = true,
+            "--help" | "-h" => out.help = true,
+            "--version" | "-v" => out.version = true,
+            "--comment" => value(&mut out.comment),
+            "--output" | "-o" => value(&mut out.output),
+            "--import" => value(&mut out.import),
+            other => out.positional.push(other.to_string()),
         }
-        i += 1;
     }
     out
-}
-
-impl Args {
-    fn has(&self, name: &str) -> bool {
-        self.flags.iter().any(|(n, _)| n == name)
-    }
-
-    fn value(&self, name: &str) -> Option<&str> {
-        self.flags
-            .iter()
-            .find(|(n, _)| n == name)
-            .and_then(|(_, v)| v.as_deref())
-    }
 }
 
 /// Opens the plugin's pane in the running herdr session.
@@ -234,7 +226,7 @@ fn open_pane_command() {
 
 fn export_command(store: &DrawingStore, args: &[String]) {
     let parsed = parse_args(args);
-    if parsed.has("help") {
+    if parsed.help {
         println!("{}", help(store));
         return;
     }
@@ -244,26 +236,26 @@ fn export_command(store: &DrawingStore, args: &[String]) {
     let Some(path) = find_drawing(store, target) else {
         fail(&format!("no drawing named \"{target}\""));
     };
-    let comment = parsed.value("comment").unwrap_or("none");
+    let comment = parsed.comment.as_deref().unwrap_or("none");
     let wrapper = comment_aliases(comment);
     let Some(wrapper) = is_wrapper(wrapper) else {
         fail(&format!("unknown comment style \"{comment}\""));
     };
     let config = ExportConfig {
-        characters: if parsed.has("basic") {
+        characters: if parsed.basic {
             Charset::Basic
         } else {
             Charset::Extended
         },
         wrapper,
-        fenced: parsed.has("fenced"),
+        fenced: parsed.fenced,
     };
     let layer = match store.load(&path) {
         Ok((_, layer)) => layer,
         Err(e) => fail(&format!("can't read {}: {e}", path.display())),
     };
     let text = format!("{}\n", export_text(&layer, &config));
-    match parsed.value("output") {
+    match parsed.output.as_deref() {
         Some(output) => {
             if let Err(e) = std::fs::write(output, text) {
                 fail(&format!("can't write {output}: {e}"));
@@ -401,11 +393,11 @@ pub fn main() {
     }
 
     let parsed = parse_args(&argv);
-    if parsed.has("help") {
+    if parsed.help {
         println!("{}", help(&store));
         return;
     }
-    if parsed.has("version") || parsed.has("v") {
+    if parsed.version {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return;
     }
@@ -415,7 +407,7 @@ pub fn main() {
 
     let config_path = crate::storage::config::config_path();
     let mut config = load_config(&config_path);
-    let drawing = match parsed.value("import") {
+    let drawing = match parsed.import.as_deref() {
         Some(file) => match std::fs::read_to_string(file) {
             Ok(text) => {
                 let base = parsed.positional.first().cloned().unwrap_or_else(|| {

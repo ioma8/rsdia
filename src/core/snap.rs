@@ -3,17 +3,17 @@
 //!
 //! Ported from ASCIIFlow (`client/snap.ts`), MIT © Lewis Hemens.
 
-use indexmap::IndexMap;
-
 use super::glyphs::{
     connect, connectable, connection_glyph, connects, disconnect, is_arrow, is_box_drawing,
 };
-use super::layer::{is_erase, Layer, LayerView, StackedLayers};
+use std::collections::{BTreeSet, HashSet};
+
+use super::layer::{is_erase, Layer};
 use super::vector::{Direction, Pos};
 
 /// Returns a layer of extra edits to apply on top of `scratch`.
 /// `protect` holds cells that must not be normalised (content being moved).
-pub fn snap(scratch: &Layer, committed: &Layer, protect: &std::collections::HashSet<Pos>) -> Layer {
+pub fn snap(scratch: &Layer, committed: &Layer, protect: &HashSet<Pos>) -> Layer {
     let mut layer = Layer::new();
 
     // Cells already written this pass, or held by scratch: both beat committed.
@@ -51,9 +51,7 @@ pub fn snap(scratch: &Layer, committed: &Layer, protect: &std::collections::Hash
                 && !connects(value, direction)
                 && connectable(value, direction)
             {
-                let current = StackedLayers::new(vec![scratch, &layer])
-                    .get(position)
-                    .unwrap_or(value);
+                let current = state_at(&layer, position).unwrap_or(value);
                 layer.set(position, connect(current, direction));
             }
             // Connect the adjacent committed glyph to this cell, accumulating so a
@@ -95,17 +93,17 @@ pub fn snap(scratch: &Layer, committed: &Layer, protect: &std::collections::Hash
     }
 
     // Normalise each touched line glyph to the neighbours it actually connects to.
-    let mut candidates: IndexMap<Pos, ()> = IndexMap::new();
+    let mut candidates: BTreeSet<Pos> = BTreeSet::new();
     for position in scratch.positions().collect::<Vec<_>>() {
         for p in std::iter::once(position).chain(Direction::ALL.map(|d| position.add(d.delta()))) {
             if !protect.contains(&p) {
-                candidates.insert(p, ());
+                candidates.insert(p);
             }
         }
     }
 
     for _pass in 0..2 {
-        for position in candidates.keys().copied().collect::<Vec<_>>() {
+        for position in candidates.iter().copied().collect::<Vec<_>>() {
             let Some(value) = state_at(&layer, position) else {
                 continue;
             };

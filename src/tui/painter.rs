@@ -108,7 +108,6 @@ pub struct Btn {
     pub active: bool,
     pub active_color: Option<Color>,
     pub disabled: bool,
-    pub bg: Option<Color>,
 }
 
 impl Btn {
@@ -135,7 +134,7 @@ impl Btn {
 }
 
 pub struct Painter<'a> {
-    pub buf: &'a mut Buffer,
+    buf: &'a mut Buffer,
     pub pal: Palette,
     pub width: i32,
     pub height: i32,
@@ -202,13 +201,9 @@ impl<'a> Painter<'a> {
     }
 
     pub fn fill(&mut self, r: Rect, bg: Color) {
-        self.fill_with(r, bg, " ", bg);
-    }
-
-    pub fn fill_with(&mut self, r: Rect, bg: Color, sym: &str, fg: Color) {
         for y in r.y..r.y + r.h {
             for x in r.x..r.x + r.w {
-                self.cell(x, y, sym, fg, bg, Modifier::empty());
+                self.cell(x, y, " ", bg, bg, Modifier::empty());
             }
         }
     }
@@ -233,10 +228,6 @@ impl<'a> Painter<'a> {
         self.chrome.push(r);
     }
 
-    pub fn hot(&mut self, action: Action, x: i32, y: i32, w: i32, h: i32) {
-        self.hotspots.push(Hotspot { action, x, y, w, h });
-    }
-
     pub fn is_hover(&self, x: i32, y: i32, w: i32, h: i32) -> bool {
         self.hover
             .is_some_and(|(hx, hy)| in_rect(Rect { x, y, w, h }, hx, hy))
@@ -246,7 +237,7 @@ impl<'a> Painter<'a> {
     /// Returns the x after the label.
     pub fn button(&mut self, action: Action, x: i32, y: i32, label: &str, b: Btn) -> i32 {
         let w = label.chars().count() as i32;
-        let bg = b.bg.unwrap_or(self.pal.tb_bg);
+        let bg = self.pal.tb_bg;
         let mut fg = b.fg.unwrap_or(self.pal.tb_label);
         let mut modifier = Modifier::empty();
         let hovered = !b.disabled && self.is_hover(x, y, w, 1);
@@ -272,7 +263,13 @@ impl<'a> Painter<'a> {
             self.width,
         );
         if !b.disabled {
-            self.hot(action, x, y, w, 1);
+            self.hotspots.push(Hotspot {
+                action,
+                x,
+                y,
+                w,
+                h: 1,
+            });
         }
         end
     }

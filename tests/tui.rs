@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use rsdia::core::layer::{Layer, LayerView};
+use rsdia::core::layer::Layer;
 use rsdia::core::vector::Pos;
 use rsdia::storage::config::DEFAULT_CONFIG;
 use rsdia::storage::drawings::DrawingStore;
@@ -383,10 +383,10 @@ fn undo_while_typing_only_removes_keystrokes() {
     h.click(30, 20);
     h.type_text("abc");
     h.key(KeyCode::Char('z'), KeyModifiers::CONTROL);
-    let rendered = h.app.editor.canvas.rendered();
-    assert_eq!(rendered.get(h.cell_at(30, 20)), Some('a'));
-    assert_eq!(rendered.get(h.cell_at(31, 20)), Some('b'));
-    assert_eq!(rendered.get(h.cell_at(32, 20)), None);
+    let rendered = |p| h.app.editor.canvas.glyph_at(p);
+    assert_eq!(rendered(h.cell_at(30, 20)), Some('a'));
+    assert_eq!(rendered(h.cell_at(31, 20)), Some('b'));
+    assert_eq!(rendered(h.cell_at(32, 20)), None);
     assert_eq!(h.committed_len(), 20);
     h.escape();
     assert_eq!(h.committed_len(), 22);
@@ -421,8 +421,8 @@ fn select_copies_cuts_pastes_and_nudges() {
     assert!(h
         .app
         .clipboard
-        .copied
-        .last()
+        .text
+        .as_deref()
         .expect("a copy")
         .contains("┌───┐"));
     h.key(KeyCode::Right, KeyModifiers::empty());
@@ -546,7 +546,7 @@ fn the_export_dialog_previews_switches_charset_and_copies() {
     let x = char_find(&frame[y], "[").expect("[") as i32 + 1;
     h.click(x, y as i32);
     assert_eq!(
-        h.app.clipboard.copied.last().map(String::as_str),
+        h.app.clipboard.text.as_deref(),
         Some("# +---+\n# |   |\n# +---+")
     );
 }
@@ -631,7 +631,7 @@ fn copy_on_select_is_off_by_default() {
     h.drag(10, 10, 14, 12, MouseButton::Left);
     h.press('2');
     h.drag(8, 8, 16, 13, MouseButton::Left);
-    assert!(h.app.clipboard.copied.is_empty());
+    assert!(h.app.clipboard.text.is_none());
 }
 
 #[test]
@@ -644,14 +644,14 @@ fn the_settings_toggle_makes_a_finished_selection_copy_itself() {
     assert!(h
         .app
         .clipboard
-        .copied
-        .last()
+        .text
+        .as_deref()
         .expect("a copy")
         .contains("┌───┐"));
     // Re-selecting the same cells yields the same text; the clipboard is left alone.
-    let n = h.app.clipboard.copied.len();
+    let n = h.app.clipboard.copies;
     h.drag(8, 8, 16, 13, MouseButton::Left);
-    assert_eq!(h.app.clipboard.copied.len(), n);
+    assert_eq!(h.app.clipboard.copies, n);
 }
 
 #[test]

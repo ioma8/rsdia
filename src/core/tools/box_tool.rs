@@ -10,7 +10,7 @@ use crate::core::snap::snap;
 use crate::core::vector::Pos;
 use std::collections::HashSet;
 
-use super::tool::{HoverHint, Mods, Tool};
+use super::tool::{Mods, Tool};
 
 pub fn draw_box(b: Bounds) -> Layer {
     let mut layer = Layer::new();
@@ -67,7 +67,7 @@ impl Tool for BoxTool {
         false
     }
 
-    fn hover_hint(&self, _canvas: &Canvas, _p: Pos, _m: Mods) -> HoverHint {
-        HoverHint::Crosshair
+    fn hover_is_target(&self, _canvas: &Canvas, _p: Pos, _m: Mods) -> bool {
+        true
     }
 }
