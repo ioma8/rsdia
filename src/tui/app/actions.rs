@@ -34,6 +34,15 @@ impl App {
         }
         if id == PanelId::Files {
             self.drawings = self.store.list();
+            // Open focused on the drawing you are already in.
+            let current = self
+                .drawings
+                .iter()
+                .position(|d| d.path == self.drawing.path);
+            self.list_selection = current.or(Some(0)).filter(|_| !self.drawings.is_empty());
+        }
+        if id == PanelId::Export {
+            self.preview_top = 0;
         }
         if is_menu(id) {
             self.menu_index = 0;
@@ -49,6 +58,42 @@ impl App {
         }
         let anchor = self.anchor_for(panel, 0);
         self.toggle_panel(panel, anchor);
+    }
+
+    /// Moves the drawings list selection by `step`, clamped to the list.
+    pub(crate) fn move_list_selection(&mut self, step: i32) {
+        if self.drawings.is_empty() {
+            self.list_selection = None;
+            return;
+        }
+        let last = self.drawings.len() as i32 - 1;
+        let at = self.list_selection.unwrap_or(0) as i32 + step;
+        self.list_selection = Some(at.clamp(0, last) as usize);
+    }
+
+    /// Selects the first or last drawing.
+    pub(crate) fn select_list_edge(&mut self, end: bool) {
+        if self.drawings.is_empty() {
+            return;
+        }
+        let last = self.drawings.len() - 1;
+        self.list_selection = Some(if end { last } else { 0 });
+    }
+
+    /// Scrolls the export preview by `step` lines.
+    pub(crate) fn scroll_preview(&mut self, step: i32) {
+        let lines = self.export_preview().lines().count() as i32;
+        self.preview_top = (self.preview_top as i32 + step).clamp(0, (lines - 1).max(0)) as usize;
+    }
+
+    /// Opens the selected drawing, if there is one.
+    pub(crate) fn open_selected_drawing(&mut self) {
+        let Some(i) = self.list_selection else {
+            return;
+        };
+        if let Some(path) = self.drawings.get(i).map(|d| d.path.clone()) {
+            self.open_drawing(&path);
+        }
     }
 
     /// Walks the menu bar to the next or previous dropdown, wrapping.

@@ -37,9 +37,22 @@ impl App {
 
     fn on_scroll(&mut self, e: &MouseEvent, dx: i32, dy: i32) {
         let (x, y) = (e.column as i32, e.row as i32);
-        // A modal-ish overlay owns the screen: the canvas behind it does not drift.
-        if self.dialog.is_some() || self.panel.is_some() {
+        // An open overlay owns the screen: the canvas behind it does not drift, and
+        // the wheel belongs to whatever list the overlay is showing.
+        if self.dialog.is_some() {
             return;
+        }
+        match self.panel {
+            Some(PanelId::Files) => {
+                self.move_list_selection(dy);
+                return;
+            }
+            Some(PanelId::Export) => {
+                self.scroll_preview(dy);
+                return;
+            }
+            Some(_) => return,
+            None => {}
         }
         self.viewport.pan(dx, dy);
         self.refresh_hover(x, y);
@@ -56,6 +69,28 @@ impl App {
                 let anchor = self.anchor_for(panel, x);
                 self.toggle_panel(panel, anchor);
             }
+        }
+    }
+
+    /// The keys an open panel answers: the drawings list is walked and opened, the
+    /// export preview scrolls. Anything else is swallowed.
+    fn panel_key(&mut self, panel: PanelId, k: &KeyEvent) {
+        let printable = printable(k);
+        match (panel, k.code) {
+            (PanelId::Files, KeyCode::Up) => self.move_list_selection(-1),
+            (PanelId::Files, KeyCode::Down) => self.move_list_selection(1),
+            (PanelId::Files, KeyCode::PageUp) => self.move_list_selection(-10),
+            (PanelId::Files, KeyCode::PageDown) => self.move_list_selection(10),
+            (PanelId::Files, KeyCode::Home) => self.select_list_edge(false),
+            (PanelId::Files, KeyCode::End) => self.select_list_edge(true),
+            (PanelId::Files, KeyCode::Enter) => self.open_selected_drawing(),
+            (PanelId::Files, _) if printable == Some('k') => self.move_list_selection(-1),
+            (PanelId::Files, _) if printable == Some('j') => self.move_list_selection(1),
+            (PanelId::Export, KeyCode::Up) => self.scroll_preview(-1),
+            (PanelId::Export, KeyCode::Down) => self.scroll_preview(1),
+            (PanelId::Export, KeyCode::PageUp) => self.scroll_preview(-10),
+            (PanelId::Export, KeyCode::PageDown) => self.scroll_preview(10),
+            _ => {}
         }
     }
 
@@ -273,9 +308,17 @@ impl App {
             }
             return;
         }
-        // A dropdown swallows everything except the ctrl chords above: plain keys,
-        // including the tool letters, must not reach the canvas behind it.
-        if self.panel.is_some_and(is_menu) {
+        // An open overlay owns the keyboard, except for the ctrl chords above: a
+        // dropdown only navigates, a panel navigates its own list, and plain keys
+        // including the tool letters must not reach the canvas behind either.
+        if let Some(panel) = self.panel {
+            if is_menu(panel) {
+                return;
+            }
+            if k.code == KeyCode::Esc {
+                return self.close_panel();
+            }
+            self.panel_key(panel, k);
             return;
         }
         if k.code == KeyCode::Esc {

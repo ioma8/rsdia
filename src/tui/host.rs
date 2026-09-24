@@ -28,6 +28,10 @@ pub trait Host {
     fn has_selection(&self) -> bool;
     /// Row of the open dropdown that keyboard navigation has highlighted.
     fn menu_index(&self) -> usize;
+    /// Selected row of the drawings list, which the list widget scrolls into view.
+    fn list_selection(&self) -> Option<usize>;
+    /// First preview line shown in the export panel.
+    fn preview_top(&self) -> usize;
     fn show_chips(&self) -> bool;
 }
 

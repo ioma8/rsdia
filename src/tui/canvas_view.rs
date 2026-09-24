@@ -74,19 +74,28 @@ pub fn render_canvas(p: &mut Painter, s: &CanvasViewState) {
 
     for sy in s.top..p.height - 1 {
         let cy = sy + oy;
-        // Document rows, like an editor gutter: panning scrolls the numbers.
-        // `DIM` keeps them secondary on whatever background the theme has, and the
-        // clip keeps a wide row number from eating the separator column.
+        // Document rows, like an editor gutter: panning scrolls the numbers. The
+        // muted colour is the app's secondary-text token, which terminal themes
+        // honour; `DIM` would look right where supported and full-brightness where
+        // it is not, and chrome that competes with the drawing is the worse failure.
+        // The clip keeps a wide row number from eating the separator column.
         p.text_clipped(
             0,
             sy,
             &format!("{:>3}", cy + 1),
-            pal.fg,
+            pal.muted,
             pal.bg,
-            Modifier::DIM,
+            Modifier::empty(),
             GUTTER_WIDTH - 1,
         );
-        p.cell(GUTTER_WIDTH - 1, sy, "│", pal.fg, pal.bg, Modifier::DIM);
+        p.cell(
+            GUTTER_WIDTH - 1,
+            sy,
+            "│",
+            pal.muted,
+            pal.bg,
+            Modifier::empty(),
+        );
         for sx in GUTTER_WIDTH..p.width {
             let cx = sx - GUTTER_WIDTH + ox;
             let pos = Pos::new(cx, cy);

@@ -522,6 +522,209 @@ fn an_open_menu_swallows_plain_keys_but_not_the_global_shortcuts() {
 }
 
 #[test]
+fn every_panel_is_titled_and_marks_its_count_in_the_border() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    for (menu, item, title) in [
+        ("File", "Drawings", " Files "),
+        ("File", "Export", " Export "),
+        ("View", "Settings", " Settings "),
+        ("Help", "Keyboard shortcuts", " Help "),
+    ] {
+        h.click_menu_item(menu, item);
+        let lines = h.frame();
+        assert!(
+            lines[1].contains(title),
+            "{title} missing from {}",
+            lines[1]
+        );
+        // The title sits in the top border, which still closes at the panel's edge.
+        let at = char_find(&lines[1], title).expect("title");
+        assert_eq!(lines[1].chars().nth(at - 1), Some('┌'), "{}", lines[1]);
+        let closes = at + title.chars().count();
+        assert!(
+            lines[1].chars().skip(closes).any(|c| c == '┐'),
+            "{}",
+            lines[1]
+        );
+        h.escape();
+    }
+}
+
+#[test]
+fn a_panel_owns_the_keyboard_while_it_is_open() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    h.click_menu_item("File", "Drawings");
+    assert_eq!(h.app.panel, Some(PanelId::Files));
+
+    let tool = h.app.tool();
+    for c in ['r', 'v', 'a', 'l', 't', 'e', '2', '?'] {
+        h.press(c);
+        assert_eq!(h.app.tool(), tool, "{c} must not reach the canvas");
+    }
+    assert_eq!(h.app.panel, Some(PanelId::Files), "and must not close it");
+    assert_eq!(h.committed_len(), 0);
+
+    // The global chords still work, and esc still closes.
+    h.key(KeyCode::Char('s'), KeyModifiers::CONTROL);
+    assert!(h.text_frame().contains("saved"));
+    h.escape();
+    assert_eq!(h.app.panel, None);
+    h.press('e');
+    assert_eq!(
+        h.app.tool(),
+        rsdia::core::editor::ToolId::Eraser,
+        "and then the canvas has it"
+    );
+}
+
+#[test]
+fn the_drawings_list_scrolls_and_opens_the_selection() {
+    let mut h = Harness::new(80, 24, Layer::new(), None);
+    for i in 0..26 {
+        h.app
+            .store
+            .create(&format!("drawing {i:02}"))
+            .expect("created");
+    }
+    h.click_menu_item("File", "Drawings");
+    let listed = |h: &mut Harness| {
+        h.frame()
+            .iter()
+            .filter(|l| l.contains("drawing "))
+            .filter_map(|l| {
+                l.split("drawing ")
+                    .nth(1)
+                    .map(|rest| rest.chars().take(2).collect::<String>())
+            })
+            .collect::<Vec<_>>()
+    };
+
+    // Far more drawings than rows: the window must follow the selection.
+    let first = listed(&mut h);
+    assert!(first.len() < 26, "the list is clipped: {}", first.len());
+    h.key(KeyCode::Home, KeyModifiers::empty());
+    assert_eq!(listed(&mut h).first().map(String::as_str), Some("00"));
+    h.key(KeyCode::End, KeyModifiers::empty());
+    assert_eq!(listed(&mut h).last().map(String::as_str), Some("25"));
+    h.key(KeyCode::Up, KeyModifiers::empty());
+    h.key(KeyCode::Up, KeyModifiers::empty());
+    assert_eq!(h.app.list_selection(), Some(24));
+
+    // Enter opens it, and the panel gets out of the way.
+    h.key(KeyCode::Enter, KeyModifiers::empty());
+    assert_eq!(h.app.drawing_name(), "drawing 24");
+    assert_eq!(h.app.panel, None);
+}
+
+#[test]
+fn the_wheel_moves_the_list_and_scrolls_the_export_preview() {
+    let mut h = Harness::new(100, 30, Layer::new(), None);
+    for i in 0..8 {
+        h.app
+            .store
+            .create(&format!("drawing {i}"))
+            .expect("created");
+    }
+    h.click_menu_item("File", "Drawings");
+    // The list opens on the drawing you are in, which here is the last one.
+    assert_eq!(h.app.list_selection(), Some(8));
+    let origin = h.app.viewport.origin;
+    h.key(KeyCode::Home, KeyModifiers::empty());
+    assert_eq!(h.app.list_selection(), Some(0));
+    h.mouse(MouseEventKind::ScrollDown, 20, 5, KeyModifiers::empty());
+    assert_eq!(h.app.list_selection(), Some(1), "the wheel walks the list");
+    h.mouse(MouseEventKind::ScrollUp, 20, 5, KeyModifiers::empty());
+    assert_eq!(h.app.list_selection(), Some(0));
+    assert_eq!(
+        h.app.viewport.origin, origin,
+        "the canvas behind the panel did not move"
+    );
+
+    h.escape();
+    h.drag(10, 10, 16, 14, MouseButton::Left);
+    h.click_menu_item("File", "Export");
+    assert_eq!(h.app.preview_top(), 0);
+    h.mouse(MouseEventKind::ScrollDown, 20, 10, KeyModifiers::empty());
+    assert_eq!(h.app.preview_top(), 1, "the preview scrolled");
+}
+
+#[test]
+fn a_terminal_too_small_says_so_instead_of_drawing_torn_chrome() {
+    let mut h = Harness::new(30, 4, Layer::new(), None);
+    let frame = h.text_frame();
+    assert!(frame.contains("terminal too small"), "{frame}");
+    assert!(!frame.contains('🭼'), "and draws no canvas");
+    let mut h = Harness::new(12, 3, Layer::new(), None);
+    assert!(h.text_frame().contains("terminal too"));
+    // ...and exactly at the floor everything is drawn again.
+    let mut h = Harness::new(20, 6, Layer::new(), None);
+    let lines = h.frame();
+    let frame = lines.join("\n");
+    assert!(!frame.contains("too small"));
+    assert!(lines[0].contains('F') && lines[0].contains('H'));
+}
+
+#[test]
+fn the_status_bar_names_the_tool_and_offers_help() {
+    use ratatui::style::Color;
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    let lines = h.frame();
+    let row = lines[39].clone();
+    assert!(row.contains(" box "), "the tool leads the row: {row}");
+    assert!(row.contains("?: help"), "{row}");
+    assert!(
+        row.contains("rsdia"),
+        "the drawing name stays on the right: {row}"
+    );
+    // The tool's chip is reversed out of the status colour.
+    let chip = h.buf.cell((2, 39)).expect("chip").style();
+    let pal = palette(ThemeName::Terminal, None);
+    assert_eq!(chip.bg, Some(pal.cyan));
+    assert_eq!(chip.fg, Some(pal.status_bg));
+    assert_ne!(pal.cyan, Color::Reset);
+
+    h.press('e');
+    let lines = h.frame();
+    assert!(lines[39].contains(" eraser "), "and follows the tool");
+}
+
+#[test]
+fn the_help_table_lays_the_shortcuts_out_in_columns() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    h.click_menu_item("Help", "Keyboard shortcuts");
+    let lines = h.frame();
+    let row = lines
+        .iter()
+        .position(|l| l.contains("switch tool by letter"))
+        .expect("a shortcut row");
+    let keys = char_find(&lines[row], "r v a l t e").expect("the key column");
+    let what = char_find(&lines[row], "switch tool").expect("the description column");
+    assert!(keys < what, "keys come first");
+    // One column for the keys, one for the descriptions: what a table guarantees.
+    let x = |h: &mut Harness, needle: &str| {
+        let lines = h.frame();
+        let row = lines.iter().position(|l| l.contains(needle)).expect(needle);
+        char_find(&lines[row], needle).expect(needle)
+    };
+    assert_eq!(x(&mut h, "ctrl+z  ctrl+y"), keys, "keys line up");
+    assert_eq!(x(&mut h, "undo / redo"), what, "descriptions line up");
+}
+
+#[test]
+fn a_dropdown_row_is_clickable_across_its_whole_width() {
+    let mut h = Harness::new(120, 40, Layer::new(), None);
+    h.drag(10, 10, 14, 12, MouseButton::Left);
+    h.key(KeyCode::Char('e'), KeyModifiers::ALT);
+    let lines = h.frame();
+    let row = lines.iter().position(|l| l.contains("Undo")).expect("Undo");
+    // Well past the text, still on the row.
+    let x = char_find(&lines[row], "Ctrl+Z").expect("the accelerator") as i32 + 1;
+    h.click(x, row as i32);
+    assert_eq!(h.committed_len(), 0, "undo ran from the row's tail");
+    assert_eq!(h.app.panel, None);
+}
+
+#[test]
 fn hovering_another_menu_label_switches_the_open_dropdown() {
     let mut h = Harness::new(120, 40, Layer::new(), None);
     h.open_menu("File");
@@ -1001,9 +1204,13 @@ fn notices_sit_where_the_hint_does() {
         .find(|l| l.contains("saved"))
         .expect("a notice")
         .clone();
-    assert!(row.chars().position(|c| c == 's').expect("saved") < 4);
+    assert!(row.chars().position(|c| c == 's').expect("saved") < 14);
     assert!(char_find(&row, "test").expect("the name") > row.chars().count() / 2);
     assert!(!row.contains("drag to draw a box"));
+    assert!(
+        row.trim_start().starts_with("box"),
+        "the tool leads the row: {row}"
+    );
 }
 
 #[test]

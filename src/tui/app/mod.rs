@@ -14,7 +14,6 @@ use crossterm::clipboard::CopyToClipboard;
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use crossterm::execute;
 use ratatui::buffer::Buffer;
-use ratatui::style::Modifier;
 
 use crate::core::canvas::{Canvas, Revision};
 use crate::core::editor::{Editor, ToolId, TOOL_IDS};
@@ -28,7 +27,9 @@ use crate::storage::drawings::{slugify, DrawingInfo, DrawingStore};
 use crate::tui::canvas_view::{render_canvas, CanvasViewState, Viewport};
 use crate::tui::host::{ConfirmKind, Dialog, Host, InputDialog, InputKind};
 use crate::tui::input::{alt_digit, ctrl_char, is_alt, is_ctrl, is_shift, printable, tool_key};
-use crate::tui::painter::{hotspot_at, in_rect, Action, Hotspot, ItemId, Painter, PanelId, Rect};
+use crate::tui::painter::{
+    from_area, hotspot_at, in_rect, Action, Hotspot, ItemId, Painter, PanelId, Rect,
+};
 use crate::tui::popovers::{
     menu_entries, menu_entry_disabled, render_dialog, render_edit_menu, render_export,
     render_file_menu, render_files, render_help, render_help_menu, render_settings,
@@ -37,8 +38,11 @@ use crate::tui::popovers::{
 use crate::tui::theme::{palette, Palette, TerminalColors, ThemeName};
 use crate::tui::toolbar::{
     layout_toolbar, menu_anchor, menu_for_mnemonic, menu_panels, render_menubar, render_toolbar,
-    MENU_Y,
+    tool_color, MENU_Y,
 };
+use ratatui::layout::{Constraint, Layout};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 
 pub struct OpenDrawing {
     pub path: PathBuf,
@@ -46,6 +50,10 @@ pub struct OpenDrawing {
     pub layer: Layer,
 }
 
+/// Below this the menu bar, the canvas, the tool picker and the status bar can no
+/// longer all be drawn, so the app says so rather than showing torn chrome.
+const MIN_WIDTH: i32 = 16;
+const MIN_HEIGHT: i32 = 6;
 const CHIP_MS: u64 = 1500;
 /// How long a first ctrl+q stays armed, waiting for the second one.
 const TOAST_MS: u64 = 2500;
@@ -61,7 +69,7 @@ enum Mode {
 fn tool_hint(tool: ToolId) -> &'static str {
     match tool {
         ToolId::Box => "drag to draw a box",
-        ToolId::Select => "drag to select or move · del erases · ctrl+c/x/v",
+        ToolId::Select => "drag to select or move · del erases · y x p copy/cut/paste",
         ToolId::Arrow => "drag to draw an arrow · press f to flip",
         ToolId::Line => "drag to draw a line · press f to flip",
         ToolId::Text => "click to place the cursor, then type",
@@ -222,10 +230,13 @@ pub struct App {
     panel_anchor: i32,
     /// Highlighted row of the open dropdown, for keyboard navigation.
     menu_index: usize,
+    /// Selected drawing in the files list; `ListState` scrolls it into view.
+    list_selection: Option<usize>,
+    /// First export preview line shown, so a long drawing can be read through.
+    preview_top: usize,
     dialog: Option<Dialog>,
     toast: Option<(String, Instant)>,
     chips_until: Instant,
-    /// After this moment a ctrl+c quits; a first ctrl+c arms it.
     /// The last text sent to the clipboard, so re-selecting the same cells does not resend it.
     last_copy: Option<String>,
     pressed: Option<(Action, i32, i32)>,
@@ -280,6 +291,8 @@ impl App {
             should_quit: false,
             panel_anchor: 0,
             menu_index: 0,
+            list_selection: None,
+            preview_top: 0,
             dialog: None,
             toast: None,
             chips_until: Instant::now(),
@@ -322,6 +335,14 @@ impl App {
 
     pub fn menu_index(&self) -> usize {
         self.menu_index
+    }
+
+    pub fn list_selection(&self) -> Option<usize> {
+        self.list_selection
+    }
+
+    pub fn preview_top(&self) -> usize {
+        self.preview_top
     }
 
     pub fn show_chips(&self) -> bool {
@@ -490,6 +511,14 @@ impl Host for App {
 
     fn menu_index(&self) -> usize {
         App::menu_index(self)
+    }
+
+    fn list_selection(&self) -> Option<usize> {
+        App::list_selection(self)
+    }
+
+    fn preview_top(&self) -> usize {
+        App::preview_top(self)
     }
 
     fn show_chips(&self) -> bool {

@@ -7,9 +7,13 @@ use crate::core::editor::ToolId;
 use crate::core::export::{Charset, WRAPPERS};
 use crate::storage::config::GRID_STYLES;
 use crate::tui::host::{Dialog, Host};
-use crate::tui::painter::{Action, Btn, ItemId, Painter, PanelId, Rect};
+use crate::tui::painter::{from_area, to_area, Action, Btn, ItemId, Painter, PanelId, Rect};
 use crate::tui::theme::{Palette, ThemeName, THEME_CHOICES};
 use crate::tui::toolbar::tool_color;
+use ratatui::layout::Constraint;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Cell, ListItem, Row, Table, Widget};
 
 // ------------------------------------------------------------------ common
 
@@ -17,10 +21,14 @@ use crate::tui::toolbar::tool_color;
 /// between the menu bar and the floating tool picker. Panels therefore never
 /// overlap the picker, whatever their contents.
 pub fn place_popover(anchor_x: i32, area: Rect, w: i32, h: i32) -> Rect {
-    let w = w.min(area.w);
-    let h = h.clamp(1, area.h.max(1));
-    let x = area.x.max((anchor_x - 2).min(area.x + area.w - w));
-    Rect { x, y: area.y, w, h }
+    let want = Rect {
+        x: (anchor_x - 2).max(area.x),
+        y: area.y,
+        w: w.max(1),
+        h: h.max(1),
+    };
+    // `Rect::clamp` shrinks and repositions in one step, which is all a popover needs.
+    from_area(to_area(want).clamp(to_area(area)))
 }
 
 /// Horizontal rule inside a panel.
@@ -142,48 +150,72 @@ pub fn render_files(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect)
     let labels: Vec<&str> = actions.iter().map(|a| a.label.as_str()).collect();
     let actions_rows = flow_height(FILES_WIDTH, &labels, "");
     let all = host.drawings();
-    let max_rows = (area.h - 6 - actions_rows).max(1) as usize;
-    let rows = &all[..max_rows.min(all.len())];
-    let h = 2 + 1.max(rows.len() as i32) + 1 + actions_rows;
+    // Two borders + the list + the rule + the button rows must fit the strip exactly.
+    let room = (area.h - 3 - actions_rows).max(1);
+    let list_rows = (all.len() as i32).clamp(1, room);
+    let selected = host.list_selection().filter(|i| *i < all.len());
+    let footer = format!("{}/{}", selected.map_or(0, |i| i + 1), all.len());
+    let h = 2 + list_rows + 1 + actions_rows;
     let r = place_popover(anchor_x, area, FILES_WIDTH, h);
-    p.panel(r, pal.tb_border, pal.tb_bg);
+    let inner = p.titled_panel(r, pal.tb_border, pal.tb_bg, Some("Files"), Some(&footer));
 
-    let mut y = r.y + 1;
-    if rows.is_empty() {
-        p.text(r.x + 2, y, "no drawings yet", pal.muted, pal.tb_bg);
-        y += 1;
-    }
-    for (i, d) in rows.iter().enumerate() {
-        let current = d.path == host.current_path();
-        let size = format!("{} cells", d.size);
-        let name_width = (r.w - 6 - size.chars().count() as i32).max(0);
-        let name = truncate_end(&d.name, name_width);
-        let label = format!(
-            "{} {:<width$} {}",
-            if current { ">" } else { " " },
-            name,
-            size,
-            width = name_width as usize
+    let list = Rect {
+        x: inner.x,
+        y: inner.y,
+        w: inner.w,
+        h: list_rows,
+    };
+    if all.is_empty() {
+        p.text(
+            inner.x + 1,
+            inner.y,
+            "no drawings yet",
+            pal.muted,
+            pal.tb_bg,
         );
-        let button_label: String = format!(" {label} ")
-            .chars()
-            .take((r.w - 2).max(0) as usize)
+    } else {
+        let size_w = all
+            .iter()
+            .map(|d| d.size.to_string().len())
+            .max()
+            .unwrap_or(1);
+        let name_w = (list.w - size_w as i32 - 8).max(4);
+
+        let current = host.current_path().to_path_buf();
+        let items: Vec<ListItem> = all
+            .iter()
+            .map(|d| {
+                let label = format!(
+                    "{} {:<width$} {:>size_w$} cells",
+                    if d.path == current { ">" } else { " " },
+                    truncate_end(&d.name, name_w),
+                    d.size,
+                    width = name_w as usize
+                );
+                let fg = if d.path == current {
+                    pal.accent
+                } else {
+                    pal.text
+                };
+                ListItem::new(Line::from(label).style(Style::new().fg(fg)))
+            })
             .collect();
-        let style = Btn {
-            active: current,
-            active_color: Some(pal.text),
-            ..Default::default()
-        };
-        p.button(Action::FilesOpen(i), r.x + 1, y, &button_label, style);
-        y += 1;
+        p.list(list, items, selected);
+        // A click anywhere on the row opens that drawing.
+        for i in 0..all.len().min(list_rows as usize) {
+            let row = Rect {
+                x: list.x,
+                y: list.y + i as i32,
+                w: list.w,
+                h: 1,
+            };
+            p.hotspot(Action::FilesOpen(i), row);
+        }
     }
-    if all.len() > rows.len() {
-        let more = format!(" +{} more ", all.len() - rows.len());
-        p.text(r.x + r.w - 12, y - 1, &more, pal.muted, pal.tb_bg);
-    }
-    rule(p, r, y);
-    y += 1;
-    flow(p, r, y, &actions, "");
+
+    let rule_y = inner.y + list_rows;
+    rule(p, r, rule_y);
+    flow(p, r, rule_y + 1, &actions, "");
 }
 
 // ------------------------------------------------------------------ export
@@ -201,12 +233,13 @@ pub fn render_export(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect
     let w = p.width.min(64.max(preview_width + 4));
     let wrap_labels: Vec<&str> = WRAPPERS.iter().map(|(_, _, label)| *label).collect();
     let wrap_rows = flow_height(w, &wrap_labels, "wrap:       ");
-    let chrome = 2 + 1 + wrap_rows + 1 + 1 + 1 + 1;
-    let max_preview = (area.h - 1 - chrome).max(1) as usize;
-    let shown = &preview[..max_preview.min(preview.len())];
-    let h = chrome + shown.len() as i32;
+    let chrome = wrap_rows + 6;
+    let preview_rows = (area.h - chrome).max(1);
+    let top = host.preview_top().min(preview.len().saturating_sub(1));
+    let h = chrome + preview_rows;
     let r = place_popover(anchor_x, area, w, h);
-    p.panel(r, pal.tb_border, pal.tb_bg);
+    let footer = format!("{}/{} lines", (top + 1).min(preview.len()), preview.len());
+    let inner = p.titled_panel(r, pal.tb_border, pal.tb_bg, Some("Export"), Some(&footer));
 
     let charset = [
         FlowButton::new(Action::ExportCharset(Charset::Extended), "extended")
@@ -230,32 +263,33 @@ pub fn render_export(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect
         })
         .collect();
 
-    let mut y = r.y + 1;
+    let mut y = inner.y;
     y = flow(p, r, y, &charset, "characters: ");
     y = flow(p, r, y, &wrappers, "wrap:       ");
     rule(p, r, y);
     y += 1;
-    for line in shown {
-        p.text_clipped(
-            r.x + 2,
+    let lines: Vec<Line> = preview
+        .iter()
+        .skip(top)
+        .take(preview_rows as usize)
+        .map(|l| Line::from(format!(" {l}")).style(Style::new().fg(pal.fg)))
+        .collect();
+    p.list(
+        Rect {
+            x: inner.x,
             y,
-            line,
-            pal.fg,
-            pal.tb_bg,
-            Modifier::empty(),
-            r.x + r.w - 2,
-        );
-        y += 1;
-    }
-    if preview.len() > shown.len() {
-        let more = format!(" +{} lines ", preview.len() - shown.len());
-        p.text(r.x + r.w - 16, y - 1, &more, pal.muted, pal.tb_bg);
-    }
+            w: inner.w,
+            h: preview_rows,
+        },
+        lines.into_iter().map(ListItem::new).collect(),
+        None,
+    );
+    y += preview_rows;
     rule(p, r, y);
     y += 1;
     let x = p.button(
         Action::ExportCopy,
-        r.x + 2,
+        inner.x + 1,
         y,
         "[copy to clipboard]",
         Btn::default().fg(pal.success),
@@ -282,7 +316,7 @@ fn settings_height() -> i32 {
 pub fn render_settings(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect) {
     let r = place_popover(anchor_x, area, SETTINGS_WIDTH, settings_height());
     let pal = p.pal;
-    p.panel(r, pal.tb_border, pal.tb_bg);
+    p.titled_panel(r, pal.tb_border, pal.tb_bg, Some("Settings"), None);
     let cfg = host.config().clone();
     let mut y = r.y + 1;
     let grids: Vec<FlowButton> = GRID_STYLES
@@ -330,7 +364,7 @@ pub const TOOL_HELP: [(ToolId, &str); 6] = [
     (ToolId::Eraser, "drag to erase"),
 ];
 
-const SHORTCUTS: [(&str, &str); 13] = [
+const SHORTCUTS: [(&str, &str); 14] = [
     (
         "1-6 / alt+1-6",
         "switch tool (box select arrow line text eraser)",
@@ -343,10 +377,17 @@ const SHORTCUTS: [(&str, &str); 13] = [
     ("y  x  p  (ctrl+x ctrl+v)", "copy / cut / paste selection"),
     ("del  arrows", "erase / nudge selection"),
     ("f", "flip elbow while dragging a line or arrow"),
-    ("scroll", "pan vertically, or horizontally with a trackpad"),
+    (
+        "scroll",
+        "pan the canvas, or scroll the list an open panel shows",
+    ),
     ("space+drag  middle-drag", "pan freely"),
     ("ctrl+o  ctrl+e  ctrl+s", "files / export / save now"),
     ("?  esc", "help / close popover, cancel, deselect"),
+    (
+        "j k  arrows  enter",
+        "walk the drawings list and open the one selected",
+    ),
     ("alt+f e v h", "open the File, Edit, View or Help menu"),
     (
         "arrows  enter",
@@ -361,55 +402,59 @@ pub fn render_help(p: &mut Painter, host: &dyn Host, anchor_x: i32, area: Rect) 
     let w = area.w.min(76);
     let h = 2 + 1 + 1 + SHORTCUTS.len() as i32 + 1;
     let r = place_popover(anchor_x, area, w, h);
-    p.panel(r, pal.tb_border, pal.tb_bg);
+    let inner = p.titled_panel(r, pal.tb_border, pal.tb_bg, Some("Help"), None);
     let tool = host.editor().tool();
-    let mut y = r.y + 1;
-    let heading = format!("{}: ", tool.name());
-    let x = p.text_clipped(
-        r.x + 2,
-        y,
-        &heading,
-        tool_color(&pal, tool),
-        pal.tb_bg,
-        Modifier::BOLD,
-        r.x + r.w - 2,
-    );
     let help = TOOL_HELP
         .iter()
         .find(|(t, _)| *t == tool)
         .map(|(_, h)| *h)
         .unwrap_or("");
-    p.text_clipped(
-        x,
-        y,
-        help,
-        pal.text,
+    p.paragraph(
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            w: inner.w,
+            h: 1,
+        },
+        Line::from(vec![
+            Span::styled(
+                format!("{}: ", tool.name()),
+                Style::new().fg(tool_color(&pal, tool)).bold(),
+            ),
+            Span::styled(help, Style::new().fg(pal.text)),
+        ]),
         pal.tb_bg,
-        Modifier::empty(),
-        r.x + r.w - 2,
     );
-    y += 1;
-    rule(p, r, y);
-    y += 1;
+    let rule_y = inner.y + 1;
+    rule(p, r, rule_y);
+    // A table gives each column its own width and clips what does not fit.
+    let rows: Vec<Row> = SHORTCUTS
+        .iter()
+        .map(|(keys, what)| {
+            Row::new(vec![
+                Cell::from(Line::from(*keys).style(Style::new().fg(pal.accent))),
+                Cell::from(Line::from(*what).style(Style::new().fg(pal.text))),
+            ])
+        })
+        .collect();
     let key_w = SHORTCUTS
         .iter()
         .map(|(k, _)| k.chars().count())
         .max()
-        .unwrap_or(0) as i32
-        + 2;
-    for (k, description) in SHORTCUTS {
-        p.text(r.x + 2, y, k, pal.accent, pal.tb_bg);
-        p.text_clipped(
-            r.x + 2 + key_w,
-            y,
-            description,
-            pal.text,
-            pal.tb_bg,
-            Modifier::empty(),
-            r.x + r.w - 2,
-        );
-        y += 1;
-    }
+        .unwrap_or(0);
+    let table = Table::new(
+        rows,
+        [Constraint::Length(key_w as u16), Constraint::Min(20)],
+    )
+    .column_spacing(2)
+    .style(Style::new().bg(pal.tb_bg));
+    let table_area = Rect {
+        x: inner.x,
+        y: rule_y + 1,
+        w: inner.w,
+        h: (inner.y + inner.h - rule_y - 1).max(0),
+    };
+    table.render(p.area(table_area), p.buf_mut());
 }
 
 // ------------------------------------------------------------------ menus
@@ -491,40 +536,61 @@ fn render_dropdown(
         .unwrap_or(0);
     let width = (label_w + key_w + 5) as i32;
     let r = place_popover(anchor_x, area, width, entries.len() as i32 + 2);
-    p.panel(r, pal.tb_border, pal.tb_bg);
+    let inner = p.titled_panel(r, pal.tb_border, pal.tb_bg, None, None);
     // A narrow terminal clamps the panel, so the label gives way first: it is
     // shortened with an ellipsis and the accelerator column is kept whole.
-    let inner = (r.w - 2).max(0) as usize;
-    let room = (inner as i32 - key_w as i32 - 3).max(1) as usize;
-    let cursor = host.menu_index();
-    for (i, (id, label, key)) in entries.iter().enumerate() {
-        let fg = match id {
-            ItemId::Undo => Some(pal.undo),
-            ItemId::Redo => Some(pal.redo),
-            ItemId::Quit => Some(pal.danger),
-            _ => None,
-        };
-        let disabled = menu_entry_disabled(host, *id);
-        let text: String = format!(
-            " {:<room$} {:>key_w$} ",
-            truncate_end(label, room as i32),
-            key
-        )
-        .chars()
-        .take(inner)
+    let room = (inner.w - key_w as i32 - 3).max(1) as usize;
+    let cursor = Some(host.menu_index()).filter(|i| {
+        entries
+            .get(*i)
+            .is_some_and(|(id, _, _)| !menu_entry_disabled(host, *id))
+    });
+    let items: Vec<ListItem> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, (id, label, key))| {
+            let fg = match id {
+                ItemId::Undo => pal.undo,
+                ItemId::Redo => pal.redo,
+                ItemId::Quit => pal.danger,
+                _ => pal.text,
+            };
+            let text: String = format!(
+                " {:<room$} {:>key_w$} ",
+                truncate_end(label, room as i32),
+                key
+            )
+            .chars()
+            .take(inner.w.max(0) as usize)
+            .collect();
+            let mut style = Style::new().fg(if menu_entry_disabled(host, *id) {
+                pal.disabled
+            } else {
+                fg
+            });
+            let row = Rect {
+                x: inner.x,
+                y: inner.y + i as i32,
+                w: inner.w,
+                h: 1,
+            };
+            if p.is_hover(row.x, row.y, row.w, row.h) {
+                style = Style::new().fg(pal.tb_hover).bg(pal.tb_hover_bg);
+            }
+            ListItem::new(Line::from(text).style(style))
+        })
         .collect();
-        p.button(
-            Action::MenuEntry(*id),
-            r.x + 1,
-            r.y + 1 + i as i32,
-            &text,
-            Btn {
-                fg,
-                disabled,
-                selected: cursor == i,
-                ..Default::default()
-            },
-        );
+    p.list(inner, items, cursor);
+    for (i, (id, _, _)) in entries.iter().enumerate() {
+        let row = Rect {
+            x: inner.x,
+            y: inner.y + i as i32,
+            w: inner.w,
+            h: 1,
+        };
+        if !menu_entry_disabled(host, *id) {
+            p.hotspot(Action::MenuEntry(*id), row);
+        }
     }
 }
 
@@ -535,23 +601,21 @@ pub fn render_dialog(p: &mut Painter, d: &Dialog) {
     let pal = p.pal;
     let w = p.width.min(56);
     let h = if d.input().is_some() { 7 } else { 6 };
-    let r = Rect {
-        x: (p.width - w) / 2,
-        y: 0.max((p.height - h) / 2),
-        w,
-        h,
-    };
-    p.panel(r, pal.accent, pal.tb_bg);
-    let title = format!(" {} ", d.title());
-    p.text_clipped(
-        r.x + 2,
-        r.y,
-        &title,
-        pal.accent,
-        pal.tb_bg,
-        Modifier::BOLD,
-        p.width,
+    // A modal sits dead centre, whatever the screen size.
+    let r = from_area(
+        to_area(Rect {
+            x: 0,
+            y: 0,
+            w: p.width,
+            h: p.height,
+        })
+        .centered(
+            Constraint::Length(w.max(1) as u16),
+            Constraint::Length(h.max(1) as u16),
+        ),
     );
+    // The block's title carries the prompt, so the body starts on the second row.
+    p.titled_panel(r, pal.accent, pal.tb_bg, Some(d.title()), None);
     match d {
         Dialog::Input(input) => {
             let y = r.y + 2;

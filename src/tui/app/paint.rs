@@ -7,6 +7,27 @@ impl App {
         let area = buf.area();
         self.width = area.width as i32;
         self.height = area.height as i32;
+        self.hotspots.clear();
+        self.chrome.clear();
+        if self.width < MIN_WIDTH || self.height < MIN_HEIGHT {
+            // Below this the bar, the canvas and the picker cannot all fit, and
+            // drawing them anyway leaves torn borders. Say so instead.
+            let pal = self.pal;
+            let mut p = Painter::new(buf, pal, None);
+            let line = Line::from(format!(
+                "terminal too small — need at least {MIN_WIDTH}x{MIN_HEIGHT}"
+            ))
+            .centered()
+            .style(Style::new().fg(pal.warning).bg(pal.bg));
+            let r = Rect {
+                x: 0,
+                y: self.height / 2,
+                w: self.width,
+                h: 1,
+            };
+            p.paragraph(r, line, pal.bg);
+            return;
+        }
         let layout = layout_toolbar(self.width, self.height);
         // The canvas strip between the menu bar and the floating picker: the drawing
         // is centred inside it and every overlay is confined to it, so neither the
@@ -66,18 +87,13 @@ impl App {
     fn paint_status(&mut self, p: &mut Painter) {
         let pal = p.pal;
         let y = self.height - 1;
-        if y < 5 {
-            return;
-        }
-        p.fill(
-            Rect {
-                x: 0,
-                y,
-                w: self.width,
-                h: 1,
-            },
-            pal.status_bg,
-        );
+        let row = Rect {
+            x: 0,
+            y,
+            w: self.width,
+            h: 1,
+        };
+        p.fill(row, pal.status_bg);
         let mut hint = tool_hint(self.tool());
         if self.placing.is_some() {
             hint = "click to place the imported text · esc cancels";
@@ -100,22 +116,43 @@ impl App {
             .filter(|(_, until)| now < *until)
             .map(|(text, _)| text.as_str());
         let right = format!(
-            "{}{}  ·  rsdia",
+            "{}{} · rsdia",
             self.drawing.name,
             if self.dirty { " •" } else { "" }
         );
-        let rx = 0.max(self.width - right.chars().count() as i32 - 1);
-        let text = message.unwrap_or(hint);
-        p.text_clipped(
-            1,
-            y,
-            text,
-            pal.status_fg,
+        // Two spans that divide the row between them: the hint grows or shrinks with
+        // the terminal, the name keeps its width. `Layout` is the idiomatic split.
+        let [left, right_area] = Layout::horizontal([
+            Constraint::Fill(1),
+            Constraint::Length(right.chars().count() as u16 + 2),
+        ])
+        .areas(p.area(row));
+        let tool = self.tool();
+        p.paragraph(
+            from_area(left),
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} ", tool.name()),
+                    Style::new()
+                        .fg(pal.status_bg)
+                        .bg(tool_color(&pal, tool))
+                        .bold(),
+                ),
+                Span::styled(
+                    format!(" {} ", message.unwrap_or(hint)),
+                    Style::new().fg(pal.status_fg),
+                ),
+                Span::styled("· ?: help", Style::new().fg(pal.muted)),
+            ]),
             pal.status_bg,
-            Modifier::empty(),
-            rx - 2,
         );
-        p.text(rx, y, &right, pal.status_fg, pal.status_bg);
+        p.paragraph(
+            from_area(right_area),
+            Line::from(format!("{right} "))
+                .right_aligned()
+                .style(Style::new().fg(pal.status_fg)),
+            pal.status_bg,
+        );
         p.chrome.push(Rect {
             x: 0,
             y,
