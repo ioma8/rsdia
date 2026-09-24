@@ -202,11 +202,10 @@ impl App {
             return self.close_panel();
         }
         match self.store.load(path) {
-            Ok((file, layer)) => self.switch_to(OpenDrawing {
+            Ok((name, layer)) => self.switch_to(OpenDrawing {
                 path: path.to_path_buf(),
-                name: file.name,
+                name,
                 layer,
-                created_at: file.created_at,
             }),
             Err(e) => self.toast(&format!("can't open: {e}")),
         }
@@ -270,12 +269,11 @@ impl App {
         self.dirty = false;
         self.store.delete(&self.drawing.path);
         if let Some(next) = self.store.list().into_iter().next() {
-            if let Ok((file, layer)) = self.store.load(&next.path) {
+            if let Ok((name, layer)) = self.store.load(&next.path) {
                 self.switch_to(OpenDrawing {
                     path: next.path,
-                    name: file.name,
+                    name,
                     layer,
-                    created_at: file.created_at,
                 });
             }
         } else {
@@ -292,7 +290,6 @@ impl App {
                 path,
                 name: name.to_string(),
                 layer: Layer::new(),
-                created_at: now_iso(),
             }),
             Err(e) => self.toast(&format!("save failed: {e}")),
         }
@@ -358,12 +355,10 @@ impl App {
                 }
                 self.editor.flush();
                 let drawing = &self.drawing;
-                match self.store.rename(
-                    &drawing.path,
-                    value,
-                    &self.editor.canvas.committed,
-                    &drawing.created_at,
-                ) {
+                match self
+                    .store
+                    .rename(&drawing.path, value, &self.editor.canvas.committed)
+                {
                     Ok(path) => {
                         self.drawing.path = path.clone();
                         self.drawing.name = value.to_string();
@@ -383,14 +378,12 @@ impl App {
                 self.editor.flush();
                 let layer = self.editor.canvas.committed.clone();
                 let path = self.store.path_for(value);
-                let created_at = now_iso();
-                match self.store.save(&path, value, &layer, &created_at) {
+                match self.store.save(&path, value, &layer) {
                     Ok(_) => {
                         self.switch_to(OpenDrawing {
                             path,
                             name: value.to_string(),
                             layer,
-                            created_at,
                         });
                         self.toast(&format!("forked to {value}"));
                         None

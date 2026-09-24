@@ -19,17 +19,9 @@ fn temp_dir(name: &str) -> PathBuf {
 #[test]
 fn save_load_round_trip_is_byte_identical() {
     let layer = text_to_layer("┌──┐\n│ \"x\" │\n└──┘ ☃", Pos::default());
-    let text = serialize(
-        "round trip",
-        &layer,
-        "2026-01-01T00:00:00.000Z",
-        "2026-01-02T00:00:00.000Z",
-    );
-    let (file, loaded) = deserialize(&text).expect("parses");
-    assert_eq!(
-        serialize(&file.name, &loaded, &file.created_at, &file.updated_at),
-        text
-    );
+    let text = serialize("round trip", &layer);
+    let (name, loaded) = deserialize(&text).expect("parses");
+    assert_eq!(serialize(&name, &loaded), text);
     assert_eq!(
         rsdia::core::text::layer_to_text(&loaded, None, true),
         "┌──┐\n│ \"x\" │\n└──┘ ☃"
@@ -44,20 +36,13 @@ fn the_store_creates_lists_renames_and_deletes() {
     let a = store.create("untitled").expect("created");
     assert_eq!(store.unique_name("untitled"), "untitled 2");
     store
-        .save(
-            &a,
-            "untitled",
-            &text_to_layer("hello", Pos::default()),
-            "2026-01-01T00:00:00.000Z",
-        )
+        .save(&a, "untitled", &text_to_layer("hello", Pos::default()))
         .expect("saved");
     let listed = store.list();
     assert_eq!(listed.len(), 1);
     assert_eq!((listed[0].name.as_str(), listed[0].size), ("untitled", 5));
     let layer = store.load(&a).expect("loads").1;
-    let b = store
-        .rename(&a, "Big Diagram!", &layer, "2026-01-01T00:00:00.000Z")
-        .expect("renamed");
+    let b = store.rename(&a, "Big Diagram!", &layer).expect("renamed");
     assert!(b.to_string_lossy().ends_with("big-diagram.rd.json"));
     assert!(!store.exists("untitled"));
     assert!(store.exists("big diagram"));
@@ -96,9 +81,7 @@ fn the_export_command_writes_what_the_library_would() {
     let store = DrawingStore::new(data.join("rsdia").join("drawings"));
     let layer = text_to_layer("┌┐\n└┘", Pos::default());
     let path = store.path_for("cli test");
-    store
-        .save(&path, "cli test", &layer, "2026-01-01T00:00:00.000Z")
-        .expect("saved");
+    store.save(&path, "cli test", &layer).expect("saved");
 
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_rsdia"))

@@ -24,7 +24,7 @@ use crate::core::text::{text_size, text_to_layer};
 use crate::core::tools::tool::{Key, Mods};
 use crate::core::vector::Pos;
 use crate::storage::config::{save_config, Config, GridStyle};
-use crate::storage::drawings::{now_iso, slugify, DrawingInfo, DrawingStore};
+use crate::storage::drawings::{slugify, DrawingInfo, DrawingStore};
 use crate::tui::canvas_view::{render_canvas, CanvasViewState, Viewport};
 use crate::tui::host::{ConfirmKind, Dialog, Host, InputDialog, InputKind};
 use crate::tui::input::{alt_digit, ctrl_char, is_ctrl, is_shift, printable, tool_key};
@@ -39,7 +39,6 @@ pub struct OpenDrawing {
     pub path: PathBuf,
     pub name: String,
     pub layer: Layer,
-    pub created_at: String,
 }
 
 const CHIP_MS: u64 = 1500;
@@ -367,12 +366,10 @@ impl App {
     pub fn save(&mut self) {
         self.save_at = None;
         let drawing = &self.drawing;
-        match self.store.save(
-            &drawing.path,
-            &drawing.name,
-            &self.editor.canvas.committed,
-            &drawing.created_at,
-        ) {
+        match self
+            .store
+            .save(&drawing.path, &drawing.name, &self.editor.canvas.committed)
+        {
             Ok(_) => self.dirty = false,
             Err(e) => self.toast(&format!("save failed: {e}")),
         }

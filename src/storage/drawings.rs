@@ -31,48 +31,12 @@ pub fn drawings_dir() -> PathBuf {
     data_dir().join("drawings")
 }
 
-pub fn now_iso() -> String {
-    // `Date.toISOString()` shape: UTC with milliseconds and a Z suffix.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs();
-    let millis = now.subsec_millis();
-    let days = (secs / 86_400) as i64;
-    let time = secs % 86_400;
-    let (h, m, s) = (time / 3600, (time % 3600) / 60, time % 60);
-    let (y, mo, d) = civil_from_days(days);
-    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}.{millis:03}Z")
-}
-
-/// Howard Hinnant's days-to-civil conversion.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
-    (if m <= 2 { y + 1 } else { y }, m, d)
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DrawingFile {
-    pub name: String,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DrawingInfo {
     pub name: String,
     pub path: PathBuf,
     /// Number of non-empty cells.
     pub size: usize,
-    pub updated_at: String,
 }
 
 /// `Café Plan / v2` -> `cafe-plan-v2`; anything without alphanumerics -> `untitled`.
@@ -125,7 +89,7 @@ pub(crate) fn json_escape(value: &str) -> String {
 }
 
 /// Cells sorted row-major so saves are deterministic.
-pub fn serialize(name: &str, layer: &Layer, created_at: &str, updated_at: &str) -> String {
+pub fn serialize(name: &str, layer: &Layer) -> String {
     let mut cells: Vec<(Pos, char)> = layer
         .entries()
         .filter(|(_, v)| !crate::core::layer::is_erase(*v))
@@ -144,8 +108,6 @@ pub fn serialize(name: &str, layer: &Layer, created_at: &str, updated_at: &str) 
         "{".to_string(),
         "  \"version\": 1,".to_string(),
         format!("  \"name\": {},", json_escape(name)),
-        format!("  \"createdAt\": {},", json_escape(created_at)),
-        format!("  \"updatedAt\": {},", json_escape(updated_at)),
         cells_field,
         "}".to_string(),
         String::new(),
@@ -153,7 +115,9 @@ pub fn serialize(name: &str, layer: &Layer, created_at: &str, updated_at: &str) 
     .join("\n")
 }
 
-pub fn deserialize(text: &str) -> Result<(DrawingFile, Layer), String> {
+/// Returns the drawing's name and cells. `createdAt`/`updatedAt` in files written
+/// by older versions are ignored.
+pub fn deserialize(text: &str) -> Result<(String, Layer), String> {
     let value: serde_json::Value =
         serde_json::from_str(text).map_err(|e| format!("Unsupported drawing file: {e}"))?;
     let version = value.get("version").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -161,24 +125,12 @@ pub fn deserialize(text: &str) -> Result<(DrawingFile, Layer), String> {
     let (Some(cells), 1) = (cells, version) else {
         return Err("Unsupported drawing file".to_string());
     };
+    let name = value
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
     let mut layer = Layer::new();
-    let file = DrawingFile {
-        name: value
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-        created_at: value
-            .get("createdAt")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-        updated_at: value
-            .get("updatedAt")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-    };
     for cell in cells {
         let Some(items) = cell.as_array() else {
             continue;
@@ -193,7 +145,7 @@ pub fn deserialize(text: &str) -> Result<(DrawingFile, Layer), String> {
         let Some(ch) = v.chars().next() else { continue };
         layer.set(Pos::new(x as i32, y as i32), ch);
     }
-    Ok((file, layer))
+    Ok((name, layer))
 }
 
 pub struct DrawingStore {
@@ -229,12 +181,11 @@ impl DrawingStore {
             }
             // Skip unreadable files rather than failing the whole list.
             if let Ok(text) = fs::read_to_string(&path) {
-                if let Ok((file, layer)) = deserialize(&text) {
+                if let Ok((name, layer)) = deserialize(&text) {
                     out.push(DrawingInfo {
-                        name: file.name,
+                        name,
                         path,
                         size: layer.len(),
-                        updated_at: file.updated_at,
                     });
                 }
             }
@@ -267,20 +218,13 @@ impl DrawingStore {
         path_for_name(name, &self.dir)
     }
 
-    pub fn load(&self, path: &Path) -> Result<(DrawingFile, Layer), String> {
+    pub fn load(&self, path: &Path) -> Result<(String, Layer), String> {
         let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
         deserialize(&text)
     }
 
-    /// Atomic write: temp file + rename. Returns the new `updatedAt`.
-    pub fn save(
-        &self,
-        path: &Path,
-        name: &str,
-        layer: &Layer,
-        created_at: &str,
-    ) -> Result<String, String> {
-        let updated_at = now_iso();
+    /// Atomic write: temp file + rename.
+    pub fn save(&self, path: &Path, name: &str, layer: &Layer) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
@@ -290,10 +234,9 @@ impl DrawingStore {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default()
         ));
-        fs::write(&tmp, serialize(name, layer, created_at, &updated_at))
-            .map_err(|e| e.to_string())?;
+        fs::write(&tmp, serialize(name, layer)).map_err(|e| e.to_string())?;
         fs::rename(&tmp, path).map_err(|e| e.to_string())?;
-        Ok(updated_at)
+        Ok(())
     }
 
     pub fn rename(
@@ -301,10 +244,9 @@ impl DrawingStore {
         old_path: &Path,
         new_name: &str,
         layer: &Layer,
-        created_at: &str,
     ) -> Result<PathBuf, String> {
         let new_path = self.path_for(new_name);
-        self.save(&new_path, new_name, layer, created_at)?;
+        self.save(&new_path, new_name, layer)?;
         if new_path != old_path {
             let _ = fs::remove_file(old_path);
         }
@@ -318,7 +260,7 @@ impl DrawingStore {
     pub fn create(&self, name: &str) -> Result<PathBuf, String> {
         self.ensure_dir();
         let path = self.path_for(name);
-        self.save(&path, name, &Layer::new(), &now_iso())?;
+        self.save(&path, name, &Layer::new())?;
         Ok(path)
     }
 }
@@ -338,18 +280,30 @@ mod tests {
     #[test]
     fn save_load_round_trip_is_byte_identical() {
         let layer = text_to_layer("┌──┐\n│ \"x\" │\n└──┘ ☃", Pos::default());
-        let text = serialize(
-            "round trip",
-            &layer,
-            "2026-01-01T00:00:00.000Z",
-            "2026-01-02T00:00:00.000Z",
-        );
-        let (file, loaded) = deserialize(&text).expect("parses");
-        assert_eq!(
-            serialize(&file.name, &loaded, &file.created_at, &file.updated_at),
-            text
-        );
+        let text = serialize("round trip", &layer);
+        let (name, loaded) = deserialize(&text).expect("parses");
+        assert_eq!(serialize(&name, &loaded), text);
         assert!(text.contains("  \"cells\": ["));
+    }
+
+    #[test]
+    fn files_with_timestamps_load_and_are_rewritten_without_them() {
+        let legacy = r#"{
+  "version": 1,
+  "name": "old",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-02T00:00:00.000Z",
+  "cells": [
+    [0,0,"┌"],[1,0,"┐"],
+    [0,1,"└"],[1,1,"┘"]
+  ]
+}"#;
+        let (name, layer) = deserialize(legacy).expect("older files still parse");
+        assert_eq!(name, "old");
+        assert_eq!(layer.len(), 4);
+        let rewritten = serialize(&name, &layer);
+        assert!(!rewritten.contains("createdAt"));
+        assert!(!rewritten.contains("updatedAt"));
     }
 
     #[test]
@@ -357,7 +311,7 @@ mod tests {
         let mut layer = Layer::new();
         layer.set(Pos::new(0, 0), 'a');
         layer.set(Pos::new(1, 0), crate::core::layer::ERASE);
-        let text = serialize("t", &layer, "c", "u");
+        let text = serialize("t", &layer);
         assert!(text.contains("[0,0,\"a\"]"));
         assert_eq!(deserialize(&text).expect("parses").1.len(), 1);
     }

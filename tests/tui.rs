@@ -16,8 +16,6 @@ use rsdia::tui::app::{App, AppOptions, Clipboard, OpenDrawing};
 use rsdia::tui::theme::{palette, TerminalColors, ThemeName};
 use rsdia::tui::toolbar::BAR_Y;
 
-const CREATED: &str = "2026-01-01T00:00:00.000Z";
-
 struct Harness {
     app: App,
     buf: Buffer,
@@ -42,12 +40,11 @@ impl Harness {
         std::fs::create_dir_all(&dir).expect("a writable temp dir");
         let store = DrawingStore::new(dir.join("drawings"));
         let path = store.path_for("test");
-        store.save(&path, "test", &layer, CREATED).expect("saved");
+        store.save(&path, "test", &layer).expect("saved");
         let drawing = OpenDrawing {
             path,
             name: "test".to_string(),
             layer,
-            created_at: CREATED.to_string(),
         };
         let app = App::new(AppOptions {
             store,

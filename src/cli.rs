@@ -15,7 +15,7 @@ use crate::core::export::{export_text, is_wrapper, Charset, ExportConfig};
 use crate::core::layer::Layer;
 use crate::core::text::text_to_layer;
 use crate::storage::config::{load_config, save_config, Config};
-use crate::storage::drawings::{now_iso, DrawingStore, FILE_EXT};
+use crate::storage::drawings::{DrawingStore, FILE_EXT};
 use crate::tui::app::{App, AppOptions, Clipboard, OpenDrawing};
 use crate::tui::theme::{detect_terminal_colors, ThemeName, PALETTE_WAIT_MS};
 
@@ -95,12 +95,11 @@ fn name_from_path(arg: &str) -> String {
 
 fn open_or_create(store: &DrawingStore, arg: &str) -> OpenDrawing {
     if let Some(existing) = find_drawing(store, arg) {
-        if let Ok((file, layer)) = store.load(&existing) {
+        if let Ok((name, layer)) = store.load(&existing) {
             return OpenDrawing {
                 path: existing,
-                name: file.name,
+                name,
                 layer,
-                created_at: file.created_at,
             };
         }
     }
@@ -114,15 +113,13 @@ fn open_or_create(store: &DrawingStore, arg: &str) -> OpenDrawing {
     } else {
         arg.to_string()
     };
-    let created_at = now_iso();
-    if let Err(e) = store.save(&path, &name, &Layer::new(), &created_at) {
+    if let Err(e) = store.save(&path, &name, &Layer::new()) {
         fail(&format!("can't write {}: {e}", path.display()));
     }
     OpenDrawing {
         path,
         name,
         layer: Layer::new(),
-        created_at,
     }
 }
 
@@ -419,16 +416,10 @@ pub fn main() {
                 let name = store.unique_name(&base);
                 let layer = text_to_layer(&text, crate::core::vector::Pos::default());
                 let path = store.path_for(&name);
-                let created_at = now_iso();
-                if let Err(e) = store.save(&path, &name, &layer, &created_at) {
+                if let Err(e) = store.save(&path, &name, &layer) {
                     fail(&format!("can't write {}: {e}", path.display()));
                 }
-                OpenDrawing {
-                    path,
-                    name,
-                    layer,
-                    created_at,
-                }
+                OpenDrawing { path, name, layer }
             }
             Err(_) => fail(&format!("can't read {file}")),
         },
