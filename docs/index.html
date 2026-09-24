@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rsdia — ASCII diagrams in your terminal</title>
+<meta name="description" content="rsdia is a terminal editor for ASCII diagrams: draw boxes, arrows, lines and text, then export it all as plain text. One static binary.">
+<link rel="icon" href="favicon.svg">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #1c1f27;
+    --ink: #d8dee9;
+    --muted: #8b93a1;
+    --line: #2e3440;
+    --accent: #88c0d0;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 4rem;
+    max-width: 62rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { margin: 0; font: 600 1.7rem/1.2 var(--mono); letter-spacing: -.02em; }
+  h2 { margin: 3rem 0 .75rem; font: 600 1.05rem/1.2 var(--mono); }
+  p { margin: .75rem 0; }
+  a { color: var(--accent); }
+  header p { color: var(--muted); max-width: 46rem; }
+  img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; }
+  figure { margin: 1.25rem 0 0; }
+  figcaption { margin-top: .5rem; color: var(--muted); font-size: .85rem; }
+  pre {
+    background: var(--line);
+    border: 1px solid #3b4252;
+    border-radius: 8px;
+    padding: .9rem 1rem;
+    overflow-x: auto;
+    font: 13px/1.5 var(--mono);
+  }
+  kbd {
+    font: 12px/1.5 var(--mono);
+    background: var(--line);
+    border: 1px solid #4c566a;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: .1rem .35rem;
+  }
+  dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: .45rem 1.25rem;
+    margin: 0;
+  }
+  dd { margin: 0; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1.25rem; }
+  footer {
+    margin-top: 3.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: .85rem;
+  }
+</style>
+
+<header>
+  <h1>rsdia</h1>
+  <p>
+    A terminal editor for ASCII diagrams: draw boxes, arrows, lines and text with
+    the mouse or the keyboard, and export the whole thing as plain text. One static
+    binary — no runtime, no server, no account.
+  </p>
+</header>
+
+<figure>
+  <img src="shots/canvas.svg" alt="rsdia in a terminal: a menu bar, a canvas holding three boxes joined by arrows, a floating tool picker, and a status bar reading &quot;box: drag to draw a box · ?: help&quot;.">
+</figure>
+
+<h2>Install</h2>
+<p>
+  Grab a binary for macOS, Linux or Windows (arm64 or x86_64) from the
+  <a href="https://github.com/ioma8/rsdia/releases">latest release</a>, or build it:
+</p>
+<pre><code>cargo install --git https://github.com/ioma8/rsdia</code></pre>
+
+<h2>Use</h2>
+<dl>
+  <dt><kbd>1</kbd>–<kbd>6</kbd> <span aria-hidden="true">·</span> <kbd>r v a l t e</kbd></dt>
+  <dd>box, select, arrow, line, text, eraser</dd>
+  <dt>drag</dt>
+  <dd>draw; <kbd>f</kbd> flips an elbow mid-drag</dd>
+  <dt><kbd>y</kbd> <kbd>x</kbd> <kbd>p</kbd></dt>
+  <dd>copy, cut, paste a selection; arrows nudge it, <kbd>del</kbd> erases it</dd>
+  <dt><kbd>ctrl</kbd>+<kbd>s</kbd> <kbd>o</kbd> <kbd>e</kbd></dt>
+  <dd>save, drawings list, export panel</dd>
+  <dt><kbd>alt</kbd>+<kbd>f e v h</kbd></dt>
+  <dd>the menus, walked with the arrows and <kbd>enter</kbd></dd>
+  <dt><kbd>?</kbd> <kbd>esc</kbd></dt>
+  <dd>help, and close, cancel or deselect</dd>
+  <dt><kbd>ctrl</kbd>+<kbd>c</kbd></dt>
+  <dd>quit; the drawing is saved first</dd>
+</dl>
+
+<div class="grid">
+  <figure>
+    <img src="shots/menu.svg" alt="The File menu open as a dropdown under the menu bar, listing Drawings…, Export… and Quit with their ctrl shortcuts.">
+    <figcaption>Menus, mouse or keyboard</figcaption>
+  </figure>
+  <figure>
+    <img src="shots/export.svg" alt="The export panel showing the drawing as plain text, with charset, comment-wrapper and markdown-fence options and buttons to copy or save it.">
+    <figcaption>The export panel, previewing the text</figcaption>
+  </figure>
+  <figure>
+    <img src="shots/help.svg" alt="The help panel: what the active tool does, over a two-column table of every shortcut.">
+    <figcaption>Every shortcut, in the app</figcaption>
+  </figure>
+</div>
+
+<h2>Where it keeps things</h2>
+<p>
+  Drawings are <code>.rd.json</code> under <code>~/.local/share/rsdia</code>,
+  settings under <code>~/.config/rsdia</code>, and they autosave. In <code>tmux</code>
+  set <code>set -g mouse on</code>; on macOS use the bare digits instead of
+  <kbd>alt</kbd>+digit.
+</p>
+
+<footer>
+  The drawing logic is ported from
+  <a href="https://github.com/lewish/asciiflow">ASCIIFlow</a> (MIT, © Lewis Hemens)
+  and stays byte-compatible with its fixtures.
+  rsdia is <a href="https://github.com/ioma8/rsdia/blob/main/LICENSE">MIT</a>.
+  <a href="https://github.com/ioma8/rsdia">Source</a> ·
+  <a href="https://github.com/ioma8/rsdia/releases">Releases</a>
+</footer>
+</html>

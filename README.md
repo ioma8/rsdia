@@ -20,6 +20,8 @@ Tagged releases carry prebuilt binaries for macOS (arm64, x86_64), Linux
 (arm64, x86_64) and Windows (arm64, x86_64). Pushing a `v*` tag runs the gates,
 builds every platform and opens a draft release with the binaries attached.
 
+Project page with screenshots: <https://ioma8.github.io/rsdia/>.
+
 ## Use
 
 ```sh
