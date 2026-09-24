@@ -62,5 +62,10 @@ cargo run --example shots   # regenerate the screenshots
 
 The drawing logic is ported from [ASCIIFlow](https://github.com/lewish/asciiflow)
 (MIT, © Lewis Hemens) and stays byte-compatible with its captured fixtures. rsdia
-began as a Rust rewrite of a TypeScript editor built on it, and is
-[MIT](https://github.com/ioma8/rsdia/blob/main/LICENSE).
+is [MIT](https://github.com/ioma8/rsdia/blob/main/LICENSE).
+
+## Why this fork
+
+Its TypeScript predecessor was genuinely useful to me, so I forked it, ported it to
+Rust and pushed on the part I cared about most — the TUI: a real menu bar and
+panels, keyboard and mouse navigation, and one binary with nothing to install.
