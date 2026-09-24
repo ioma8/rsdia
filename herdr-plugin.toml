@@ -1,28 +1,28 @@
-id = "mpospirit.lazydraw"
-name = "lazydraw"
-version = "0.1.1"
+id = "mpospirit.rsdia"
+name = "rsdia"
+version = "0.2.0"
 min_herdr_version = "0.9.0"
 description = "Terminal ASCII editor for drawing quick diagrams and sketches"
 platforms = ["linux", "macos"]
 
-# lazydraw runs from source on Bun; fetch its one runtime dependency at install time.
+# rsdia is a single static binary; build it once at install time.
 [[build]]
-command = ["bun", "install", "--production"]
+command = ["cargo", "build", "--release"]
 
-# The editor itself. open-pane.ts requests a right-hand split against the
+# The editor itself. `rsdia open-pane` requests a right-hand split against the
 # active pane at launch time, overriding this default.
 [[panes]]
 id = "canvas"
-title = "lazydraw"
+title = "rsdia"
 placement = "split"
-command = ["bun", "src/cli.ts"]
+command = ["target/release/rsdia"]
 
 # Keybindings can only invoke actions, so this opens the pane over the socket API.
 [[actions]]
 id = "open"
-title = "Open lazydraw"
+title = "Open rsdia"
 contexts = ["workspace"]
-command = ["bun", "herdr/open-pane.ts"]
+command = ["target/release/rsdia", "open-pane"]
 
 # Plugin manifests cannot declare keybindings themselves — herdr owns that
 # surface. Add the block below to your own config.toml (see README) and
@@ -31,5 +31,5 @@ command = ["bun", "herdr/open-pane.ts"]
 # [[keys.command]]
 # key = "prefix+ctrl+d"
 # type = "plugin_action"
-# command = "mpospirit.lazydraw.open"
-# description = "open lazydraw"
+# command = "mpospirit.rsdia.open"
+# description = "open rsdia"

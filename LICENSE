@@ -25,7 +25,7 @@ SOFTWARE.
 
 ## Third-party notices
 
-lazydraw includes code ported from ASCIIFlow (https://github.com/lewish/asciiflow):
+rsdia includes code ported from ASCIIFlow (https://github.com/lewish/asciiflow):
 src/core/{glyphs,snap,route,entity,text,export}.ts, src/core/tools/{box,line,move,select,text}.ts,
 test/upstream/*.spec.ts
 
